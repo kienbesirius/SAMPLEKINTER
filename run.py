@@ -1,0 +1,7 @@
+from src import linked_gui
+
+def main():
+    linked_gui.main_gui()
+
+if __name__ == "__main__":
+    main()
