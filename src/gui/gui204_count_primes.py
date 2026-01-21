@@ -1,6 +1,8 @@
 import os
 import re
 import sys
+import time
+import threading
 import tkinter as tk
 from pathlib import Path
 from src.platform import dpi
@@ -63,7 +65,16 @@ class LeetCode204_Gui:
         self.logger, self.log_buffer = build_log_buffer(name="LeetCode204_Gui", level=20, max_buffer=500)
         self.emit_msg = self.logger.info
 
+
+        self._task_handler = None # Task handler dùng làm gì? Tại sao bằng None
+        self._running = False # Kiểm tra có đang chạy tác vụ nào đó không
+
+        # Pmp log buffer -> optional for text widget
+        self._log_last_idx = 0
+        self._log_lock = getattr(self.logger, "_samplekinter_lock", threading.RLock())
+
         self.root = root
+        self.runner = sub_thread.SubThreadRunner(self.root, poll_ms=80)
         root.title("LeetCode204 Count Primes")
         root.geometry(f"{W}x{H}")
         root.resizable(False, False)
@@ -87,6 +98,8 @@ class LeetCode204_Gui:
         
         self.build_gui()
         self.build_events()
+
+        self._pump_logs()
 
     def build_gui(self):
         x_axis = W // 2
@@ -136,7 +149,7 @@ class LeetCode204_Gui:
             image=self.assets["result_field"], anchor="n"
         )
 
-        self.result_var = tk.StringVar()
+        self.result_var = tk.StringVar() # Use for log pump as well 
         self.result_label = tk.Label(
             self.root, 
             textvariable=self.result_var,
@@ -304,3 +317,24 @@ class LeetCode204_Gui:
         else:
             self._set_entry_bg("normal")
 
+    def _pump_logs(self):
+        # Safely grab any new log entries since last index and append them
+        # to the result_var. The shared buffer is a List[str], so slice from
+        # _log_last_idx to the end and advance by the number of entries.
+        with self._log_lock:
+            # slicing is safe even if _log_last_idx > len(self.log_buffer)
+            logs = list(self.log_buffer[self._log_last_idx:])
+            if logs:
+                existing_text = self.result_var.get()
+                appended = "\n".join(logs)
+                # if there is existing text, add a newline separator first
+                new_text = existing_text + ("\n" if existing_text else "") + appended
+                self.result_var.set(new_text)
+                self._log_last_idx += len(logs)
+
+        # Schedule next pump
+        try:
+            self.root.after(200, self._pump_logs)
+        except Exception:
+            # If root has been destroyed, ignore scheduling errors silently
+            pass
