@@ -41,9 +41,13 @@ FONT_ASSET = {
 ASSET_FILES = {
     "images_dimension": IMAGES_PATH / "dimension_constraints.png",
     "notice_title": RESOURCE_PATH / "gui204_count_primes" / "Notice_Title.png",
+    "279_notice_title": RESOURCE_PATH / "gui279_perfect_squares" / "279_Notice_Title.png",
     "entry_field_normal": RESOURCE_PATH / "gui204_count_primes" / "entry-field-normal.png",
     "entry_field_disabled": RESOURCE_PATH / "gui204_count_primes" / "entry-field-disabled.png",
     "entry_field_focused": RESOURCE_PATH / "gui204_count_primes" / "entry-field-focused.png",
+    "279_entry_field_normal": RESOURCE_PATH / "gui279_perfect_squares" / "279-entry-field-normal.png",
+    "279_entry_field_disabled": RESOURCE_PATH / "gui279_perfect_squares" / "279-entry-field-disabled.png",
+    "279_entry_field_focused": RESOURCE_PATH / "gui279_perfect_squares" / "279-entry-field-focused.png",
     "button_start_normal": RESOURCE_PATH / "gui204_count_primes" / "button-start-normal.png",
     "button_start_hover": RESOURCE_PATH / "gui204_count_primes" / "button-start-hover.png",
     "button_start_active": RESOURCE_PATH / "gui204_count_primes" / "button-start-active.png",
@@ -51,7 +55,9 @@ ASSET_FILES = {
     "button_cancel_hover": RESOURCE_PATH / "gui204_count_primes" / "button-cancel-hover.png",
     "button_cancel_active": RESOURCE_PATH / "gui204_count_primes" / "button-cancel-active.png",
     "background_gui204_640x480": RESOURCE_PATH / "gui204_count_primes" / "background-gui204_count_primes.png",
+    "background_gui279_640x480": RESOURCE_PATH / "gui279_perfect_squares" / "background-gui279_perfect_squares.png",
     "result_field": RESOURCE_PATH / "gui204_count_primes" / "result-field.png",
+    "279_result_field": RESOURCE_PATH / "gui279_perfect_squares" / "279-result-field.png",
 }
 
 def _sha256(p: Path) -> str:
