@@ -92,7 +92,7 @@ class LeetCode279_Gui:
 
         self.root = root
 
-        self.runner = sub_thread.SubThreadRunner(self.root)
+        self.runner = sub_thread.SubProcessRunner(self.root)
 
         self.root.title("LeetCode 279 - Perfect Squares")
         self.root.geometry(f"{W}x{H}")
@@ -344,20 +344,24 @@ class LeetCode279_Gui:
         )
 
     def on_start_clicked(self):
-        self.emit_msg("Start button clicked.")
+        # self.emit_msg("Start button clicked.")
+        if self._running:
+            self.emit_msg("A task is already running. Please wait or cancel it first.")
+            return
+        
         try:
             n = int(self.entry_n_var.get().strip())
             if n < 1:
                 self.emit_msg("Please enter a positive integer greater than 0.")
                 return  
+            
+            if n > 990000:
+                self.emit_msg("Please enter a smaller integer (<= 20000) to avoid long computation time.")
+                return
         except:
             self.emit_msg("Invalid input. Please enter a valid positive integer.")
             return
 
-        if self._running:
-            self.emit_msg("A task is already running. Please wait or cancel it first.")
-            return
-        
         self._running = True
         # self.disable_entry()
         self.emit_msg(f"Starting computation for n={n}...")
@@ -375,37 +379,38 @@ class LeetCode279_Gui:
         )
 
     def _task_start_cb(self, meta):
-        self.emit_msg(f"Task started: {meta}")
+        # self.emit_msg(f"Task started: {meta}")
+        pass
 
     def _task_success_cb(self, n, result, meta):
-        self.emit_msg(f"Task succeeded: {meta}")
-        self.result_field_var.set(f"Number of perfect squares <= {n}: {result}")
+        # self.emit_msg(f"Task succeededed: {meta}")
+        self.emit_msg(f"Number of perfect squares <= {n}: {result}")
 
     def _task_error_cb(self, exception, meta):
-        self.emit_msg(f"Task failed: {meta}")
-        self.emit_msg(f"Error details: {exception}")
+        # self.emit_msg(f"Task failed: {meta}")
+        self.emit_msg(f"Error details exception: {exception}")
 
     # Căn cứ theo runner hiện tại được định nghĩa trong utils/sub_thread.py
     def _task_finally_cb(self, status:str, meta:dict):
         self._running = False
-        self.emit_msg(f"Task {status}: {meta}")
+        # self.emit_msg(f"Task {status}: {meta}")
         self._task_handler = None
         if status == "cancelled":
             self.emit_msg("Computation was cancelled by the user.")
-        elif status == "ok":
-            self.emit_msg("Computation completed successfully.")
-        else:
-            self.emit_msg("Computation ended with errors.")
-            self.emit_msg(f"Error details: {meta}")
+        # elif status == "ok":
+        #     self.emit_msg("Computation completed successfully.")
+        # else:
+        #     # self.emit_msg("Computation ended with errors.")
+        #     self.emit_msg(f"Error details meta: {meta}")
 
     # task progress callback: called in the main thread
     def _task_progress_cb(self, payload):
         pct = payload.get("percentage", 0)
         index = payload.get("index", 0)
-        self.emit_msg(f"Progress: {pct}% (Computed up to index {index})")
+        self.emit_msg(f"Progress: {pct}%")
 
     def on_cancel_clicked(self):
-        self.emit_msg("Cancel button clicked.")
+        # self.emit_msg("Cancel button clicked.")
         if self._task_handler and self._running:
             self.emit_msg("Cancelling the running task...")
             self.runner.cancel(self._task_handler)  # set handle.cancel_event
@@ -418,23 +423,9 @@ class LeetCode279_Gui:
         with self._log_lock:
             buf_len = len(self.log_buffer)
 
-            # ✅ nếu buffer đã bị trim/clear khiến cursor > len(buffer) => resync từ tail
-            if self._log_last_idx > buf_len:
-                tail = self.log_buffer[max(0, buf_len - self.UI_MAX_LINES):]
-                self._ui_lines.clear()
-                self._ui_lines.extend(tail)
-                self._log_last_idx = buf_len
-                updated = True
-            else:
-                new_logs = self.log_buffer[self._log_last_idx:buf_len]
-                self._log_last_idx = buf_len
-                if new_logs:
-                    self._ui_lines.extend(new_logs)
-                    updated = True
-
-        if updated:
-            self.result_field_var.set("\n".join(self._ui_lines))
-
+            new_logs = self.log_buffer[buf_len-1:]
+            if new_logs:
+                self.result_field_var.set("\n".join(new_logs))
         try:
             self.root.after(200, self._pump_logs)
         except Exception:

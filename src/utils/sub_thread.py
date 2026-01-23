@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+import multiprocessing as mp
+import sys
+
 import queue
 import threading
 import time
@@ -235,4 +238,259 @@ class SubThreadRunner:
             self.root.after(self.poll_ms, self._poll)
         except Exception:
             # root destroyed
+            return
+
+# ---------------------------
+# SubProcessRunner (CPU-bound safe)
+# ---------------------------
+
+_PROGRESS_SENTINEL = "__SUBPROCESS_RUNNER_PROGRESS__"
+
+def _subprocess_worker_entry(task_id: str,
+                             func,
+                             args,
+                             kwargs,
+                             meta: dict,
+                             out_q,
+                             cancel_event) -> None:
+    """
+    Runs inside child process.
+    - Replaces progress_cb sentinel with a real callback that posts to out_q.
+    - Posts ("ok"/"err"/"cancelled") to out_q with task_id + meta.
+    """
+    try:
+        # Build progress callback in the child (picklable-safe)
+        if isinstance(kwargs, dict) and kwargs.get("progress_cb") == _PROGRESS_SENTINEL:
+            def _progress_cb(payload):
+                try:
+                    out_q.put((task_id, "progress", payload, meta))
+                except Exception:
+                    pass
+            kwargs["progress_cb"] = _progress_cb
+
+        if cancel_event is not None and getattr(cancel_event, "is_set", None) and cancel_event.is_set():
+            out_q.put((task_id, "cancelled", None, meta))
+            return
+
+        result = func(*args, **kwargs)
+
+        if cancel_event is not None and getattr(cancel_event, "is_set", None) and cancel_event.is_set():
+            out_q.put((task_id, "cancelled", None, meta))
+        else:
+            out_q.put((task_id, "ok", result, meta))
+
+    except Exception:
+        import traceback as _tb
+        try:
+            out_q.put((task_id, "err", _tb.format_exc(), meta))
+        except Exception:
+            pass
+
+
+@dataclass(frozen=True)
+class ProcessTaskHandle:
+    task_id: str
+    cancel_event: Any
+    process: Any
+
+
+class SubProcessRunner:
+    """
+    Tkinter-safe runner using multiprocessing.Process.
+    Best for CPU-bound tasks (keeps Tk UI responsive by bypassing GIL).
+
+    Notes:
+    - func should be picklable (top-level function, not lambda/nested) for spawn.
+    - On Windows (spawn), your app entry must be under if __name__ == "__main__".
+    """
+
+    def __init__(self, root, poll_ms: int = 50, start_method: Optional[str] = None):
+        self.root = root
+        self.poll_ms = int(poll_ms)
+
+        if start_method is None:
+            start_method = "spawn" if sys.platform.startswith("win") else "fork"
+
+        self._ctx = mp.get_context(start_method)
+        self._q = self._ctx.Queue()
+
+        self._lock = threading.Lock()
+        self._seq = 0
+        self._tasks: Dict[str, Dict[str, Any]] = {}
+        self._polling_started = False
+
+    def submit(
+        self,
+        func: Callable[..., Any],
+        args: Tuple[Any, ...] = (),
+        kwargs: Optional[Dict[str, Any]] = None,
+        *,
+        name: Optional[str] = None,
+        on_start: Optional[StartCallback] = None,
+        on_success: Optional[SuccessCallback] = None,
+        on_error: Optional[ErrorCallback] = None,
+        on_finally: Optional[FinallyCallback] = None,
+        on_progress: Optional[ProgressCallback] = None,
+        inject_cancel_event: bool = True,
+        inject_progress_cb: bool = True,
+        daemon: bool = True,
+    ) -> ProcessTaskHandle:
+        if kwargs is None:
+            kwargs = {}
+
+        with self._lock:
+            self._seq += 1
+            task_id = f"task-{int(time.time()*1000)}-{self._seq}"
+            cancel_event = self._ctx.Event()
+
+            meta: Dict[str, Any] = {
+                "task_id": task_id,
+                "name": name or getattr(func, "__name__", "task"),
+                "func_name": getattr(func, "__name__", "task"),
+            }
+
+            self._tasks[task_id] = {
+                "meta": meta,
+                "on_start": on_start,
+                "on_success": on_success,
+                "on_error": on_error,
+                "on_finally": on_finally,
+                "on_progress": on_progress,
+                "cancel_event": cancel_event,
+                "process": None,
+            }
+
+        self._ensure_polling()
+
+        wk_kwargs = dict(kwargs)
+
+        if inject_cancel_event:
+            self._try_inject_kw(func, wk_kwargs, "cancel_event", cancel_event)
+
+        # progress_cb must be created in the child process (avoid non-picklable lambdas)
+        if inject_progress_cb:
+            try:
+                sig = inspect.signature(func)
+                if "progress_cb" in sig.parameters and "progress_cb" not in wk_kwargs:
+                    wk_kwargs["progress_cb"] = _PROGRESS_SENTINEL
+            except Exception:
+                pass
+
+        p = self._ctx.Process(
+            target=_subprocess_worker_entry,
+            args=(task_id, func, args, wk_kwargs, meta, self._q, cancel_event),
+            daemon=daemon,
+            name=f"SubProcessRunner-{task_id}",
+        )
+        p.start()
+
+        with self._lock:
+            if task_id in self._tasks:
+                self._tasks[task_id]["process"] = p
+
+        # Fire on_start on the Tk thread
+        if on_start:
+            try:
+                self.root.after(0, lambda m=meta, cb=on_start: cb(m))
+            except Exception:
+                pass
+
+        return ProcessTaskHandle(task_id=task_id, cancel_event=cancel_event, process=p)
+
+    def cancel(self, handle: ProcessTaskHandle, force: bool = False) -> None:
+        try:
+            handle.cancel_event.set()
+        except Exception:
+            pass
+
+        if force:
+            try:
+                if handle.process.is_alive():
+                    handle.process.terminate()
+            except Exception:
+                pass
+            task = self._tasks.get(handle.task_id)
+            meta = task["meta"] if task else {"task_id": handle.task_id, "name": "task", "func_name": "task"}
+            try:
+                self._q.put((handle.task_id, "cancelled", None, meta))
+            except Exception:
+                pass
+
+    def _ensure_polling(self) -> None:
+        if self._polling_started:
+            return
+        self._polling_started = True
+        try:
+            self.root.after(self.poll_ms, self._poll)
+        except Exception:
+            self._polling_started = False
+
+    def _try_inject_kw(self, func: Callable[..., Any], kw: Dict[str, Any], key: str, value: Any) -> None:
+        if key in kw:
+            return
+        try:
+            sig = inspect.signature(func)
+            if key in sig.parameters:
+                kw[key] = value
+        except Exception:
+            return
+
+    def _poll(self) -> None:
+        try:
+            if not self.root.winfo_exists():
+                return
+        except Exception:
+            return
+
+        try:
+            while True:
+                task_id, status, payload, meta = self._q.get_nowait()
+
+                task = self._tasks.get(task_id)
+                if not task:
+                    continue
+
+                if status == "progress":
+                    cb = task.get("on_progress")
+                    if cb:
+                        try:
+                            cb(payload)
+                        except Exception:
+                            pass
+                    continue
+
+                if status == "ok":
+                    cb = task.get("on_success")
+                    if cb:
+                        cb(payload, meta)
+                elif status == "err":
+                    cb = task.get("on_error")
+                    if cb:
+                        cb(payload, meta)
+                # cancelled => only finally
+
+                cbf = task.get("on_finally")
+                if cbf:
+                    try:
+                        cbf(status, meta)
+                    except Exception:
+                        pass
+
+                proc = task.get("process")
+                try:
+                    if proc is not None:
+                        proc.join(timeout=0.05)
+                except Exception:
+                    pass
+
+                self._tasks.pop(task_id, None)
+
+        except queue.Empty:
+            pass
+        except (EOFError, OSError):
+            return
+
+        try:
+            self.root.after(self.poll_ms, self._poll)
+        except Exception:
             return
