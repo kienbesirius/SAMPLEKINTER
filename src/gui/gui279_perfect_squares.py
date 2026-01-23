@@ -73,7 +73,6 @@ class LeetCode279_Gui:
     dpi.set_dpi_awareness()
 
     def __init__(self, root: tk.Tk):
-        self.UI_MAX_LINES = 200
         self.LOG_MAX = 500
         self.logger, self.log_buffer = build_log_buffer(name= "LeetCode279",max_buffer=self.LOG_MAX)
         self.emit_msg = self.logger.info 
@@ -82,13 +81,7 @@ class LeetCode279_Gui:
         self._running = False
 
         # build_log_buffer attaches a lock as `_laserlink_lock` on the logger
-        # use that lock to safely read the shared list buffer.
-        # cursor theo index trong list buffer
-        self._log_last_idx = 0
-        # UI chỉ giữ 200 dòng gần nhất
-        self._ui_lines = deque(maxlen=self.UI_MAX_LINES)
-
-        self._log_lock = getattr(self.logger, "_laserlink_lock", threading.RLock())
+        self._log_lock = getattr(self.logger, "_samplekinter_lock", threading.RLock())
 
         self.root = root
 
@@ -418,8 +411,6 @@ class LeetCode279_Gui:
             self.emit_msg("Không có tác vụ nào đang chạy để hủy.")
 
     def _pump_logs(self):
-        updated = False
-
         with self._log_lock:
             buf_len = len(self.log_buffer)
 

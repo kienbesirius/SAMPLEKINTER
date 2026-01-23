@@ -39,6 +39,34 @@ FONT_ASSET = {
 }
 
 ASSET_FILES = {
+    # Blank design
+    "button_normal": RESOURCE_PATH / "blank" / "button-normal.png",
+    "button_hover": RESOURCE_PATH / "blank" / "button-hover.png",
+    "button_active": RESOURCE_PATH / "blank" / "button-active.png",
+    "button_disabled": RESOURCE_PATH / "blank" / "button-disabled.png",
+    
+    "entry_normal": RESOURCE_PATH / "blank" / "entry-normal.png", 
+    "entry_focused": RESOURCE_PATH / "blank" / "entry-focused.png",
+    "entry_disabled": RESOURCE_PATH / "blank" / "entry-disabled.png", # 7 char
+
+    "entry_wide_1_normal": RESOURCE_PATH / "blank" / "entry-wide-1-normal.png",
+    "entry_wide_1_focused": RESOURCE_PATH / "blank" / "entry-wide-1-focused.png",
+    "entry_wide_1_disabled": RESOURCE_PATH / "blank" / "entry-wide-1-disabled.png", # 12 char (+5)
+
+    "entry_wide_2_normal": RESOURCE_PATH / "blank" / "entry-wide-2-normal.png",
+    "entry_wide_2_focused": RESOURCE_PATH / "blank" / "entry-wide-2-focused.png",
+    "entry_wide_2_disabled": RESOURCE_PATH / "blank" / "entry-wide-2-disabled.png", # 17 char (+5)
+
+    "entry_wide_3_normal": RESOURCE_PATH / "blank" / "entry-wide-3-normal.png", 
+    "entry_wide_3_focused": RESOURCE_PATH / "blank" / "entry-wide-3-focused.png",
+    "entry_wide_3_disabled": RESOURCE_PATH / "blank" / "entry-wide-3-disabled.png", # 22 char (+5)
+
+    "text_area": RESOURCE_PATH / "blank" / "text-area.png", # 7 char
+    "text_wide_1_area": RESOURCE_PATH / "blank" / "text-wide-1-area.png", # 12 char (+5)
+    "text_wide_2_area": RESOURCE_PATH / "blank" / "text-wide-2-area.png", # 17 char (+5)
+    "text_wide_3_area": RESOURCE_PATH / "blank" / "text-wide-3-area.png", # 22 char (+5)
+
+    # Specific designs
     "images_dimension": IMAGES_PATH / "dimension_constraints.png",
     "notice_title": RESOURCE_PATH / "gui204_count_primes" / "Notice_Title.png",
     "279_notice_title": RESOURCE_PATH / "gui279_perfect_squares" / "279_Notice_Title.png",

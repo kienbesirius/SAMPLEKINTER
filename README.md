@@ -1,6 +1,6 @@
 # LeetCode279: Perfect Squares
-![LeetCode279-Design ](src/assets/resources/gui204_count_primes/LeetCode204-design-tkapp.png)
-*(Đảm bảo rằng file ảnh nằm đúng vị trí: `src/assets/resources/gui204_count_primes/LeetCode204-design-tkapp.png`)*
+![LeetCode279-Design ](src/assets/resources/gui279_perfect_squares/LeetCode279-design-tkapp.png)
+*(Đảm bảo rằng file ảnh nằm đúng vị trí: `src/assets/resources/gui279_perfect_squares/LeetCode279-design-tkapp.png`)*
 
 # LeetCode204: CountPrimes
 ![LeetCode204-Design ](src/assets/resources/gui204_count_primes/LeetCode204-design-tkapp.png)

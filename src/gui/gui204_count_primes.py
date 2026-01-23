@@ -43,18 +43,23 @@ def set_default_font(font: tkfont.Font):
     )
 
 # Core-Example function to count primes in a range
-def countZ_primes(n: int) -> int:
+def countZ_primes(n: int, cancel_event: threading.Event, progress_cb=None) -> int:
     if n <= 2: 
         return 0
     sieve = bytearray(b"\x01")*n
     sieve[0:2] = b"\x00\x00"
     p = 2
     while p * p < n:
+        if cancel_event and cancel_event.is_set():
+            return -1
         if sieve[p]:
             step = p
             start = p*p
             sieve[start:n:step] = b"\x00" * ((n- start - 1) // step + 1)
         p += 1
+        if callable(progress_cb):
+            pct = int((p * p) / n * 100)
+            progress_cb({"pct": pct,})
     return int(sum(sieve))
 
 # GUI Phase
@@ -62,19 +67,17 @@ W, H = 640, 480
 class LeetCode204_Gui:
     dpi.set_dpi_awareness()
     def __init__(self, root: tk.Tk):
-        self.logger, self.log_buffer = build_log_buffer(name="LeetCode204_Gui", level=20, max_buffer=500)
+        self.logger, self.log_buffer = build_log_buffer(name="LeetCode204_Gui", max_buffer=500)
         self.emit_msg = self.logger.info
-
 
         self._task_handler = None # Task handler dùng làm gì? Tại sao bằng None
         self._running = False # Kiểm tra có đang chạy tác vụ nào đó không
 
         # Pmp log buffer -> optional for text widget
-        self._log_last_idx = 0
         self._log_lock = getattr(self.logger, "_samplekinter_lock", threading.RLock())
 
         self.root = root
-        self.runner = sub_thread.SubThreadRunner(self.root, poll_ms=80)
+        self.runner = sub_thread.SubProcessRunner(self.root, poll_ms=80)
         root.title("LeetCode204 Count Primes")
         root.geometry(f"{W}x{H}")
         root.resizable(False, False)
@@ -85,11 +88,6 @@ class LeetCode204_Gui:
         topmost_window(root)
         set_default_font(self.tektur_font)
         
-        # In ra các font có chữ "Tektur"
-        tektur = sorted([f for f in tkfont.families(root) if "Tektur" in f])
-        self.emit_msg("Tektur families: " + ", ".join(tektur))
-        self.emit_msg(f"Có 'Tektur' không? " + str(bool("Tektur" in tkfont.families(root))))
-
         # Make a canvas full-screen as background
         self.canvas_full = tk.Canvas(root, width=W, height=H, highlightthickness=0)
         self.canvas_full.pack(fill="both", expand=True)
@@ -113,21 +111,43 @@ class LeetCode204_Gui:
         self.canvas_full.create_image(x_axis, y_item_offset, image=self.assets["notice_title"], anchor="n")
 
         # Calculate next item offset
-        y_item_offset += self.assets["notice_title"].height()*2
+        y_item_offset += self.assets["notice_title"].height()*1.7
 
-        entry_w = self.assets["entry_field_normal"].width() - 23
-        entry_h = self.assets["entry_field_normal"].height() - 23
+        entry_w = self.assets["279_entry_field_normal"].width() - 20
+        entry_h = self.assets["279_entry_field_normal"].height() - 44
 
-        self.build_entry_block(
-            x=x_axis, y=y_item_offset,
-            img_normal_key="entry_field_normal",
-            img_focus_key="entry_field_focused",
-            img_disabled_key="entry_field_disabled",
-            width=entry_w, height=entry_h
+        self.entry_nvar = tk.StringVar()
+        self.n_entry = tk.Entry(
+            self.root,
+            textvariable=self.entry_nvar,
+            font=self.tektur_font,
+            bd=0, 
+            relief="flat",
+            highlightthickness=0,
+            background="white"
         )
 
+        self.entry_background = self.canvas_full.create_image(
+            x_axis,
+            y_item_offset,
+            anchor=tk.CENTER,
+            image=self.assets["279_entry_field_normal"],
+            tags="entry_background"
+        )
+
+        self.entry_id = self.canvas_full.create_window(
+            x_axis,
+            y_item_offset,
+            anchor=tk.CENTER,
+            window=self.n_entry,
+            width=entry_w,
+            height=entry_h,
+            tags="entry_id"
+        )
+
+
         # Calculate next item offset
-        y_item_offset += self.assets["entry_field_normal"].height()
+        y_item_offset += self.assets["entry_field_normal"].height()//2
 
         # 4) start_button - center the start button
         self.start_button_id = self.canvas_full.create_image(
@@ -144,39 +164,95 @@ class LeetCode204_Gui:
         y_item_offset += self.assets["button_cancel_normal"].height() + 15
 
         # 6) result_field - center the result field
-        self.result_field_id = self.canvas_full.create_image(
-            x_axis, y_item_offset,
-            image=self.assets["result_field"], anchor="n"
-        )
+        self.result_var = tk.StringVar()
 
-        self.result_var = tk.StringVar() # Use for log pump as well 
-        self.result_label = tk.Label(
-            self.root, 
-            textvariable=self.result_var,
-            font=("Tektur", 13),
-            bg="#FFFFFF",
-        )
+        self.result_frame = tk.Frame(self.root, bg="white")
 
-        result_w = self.assets["result_field"].width() - 40
-        result_h = self.assets["result_field"].height() - 40
-        center_result_bg_offset = (self.assets["result_field"].height()//2)
+        self.result_label = tk.Text(self.result_frame,bg="white",highlightthickness=0,wrap="word",bd=0,font=("Tektur", 9, "normal"))
+
+        self._result_scroll = tk.Scrollbar(self.result_frame, orient="vertical", command=self.result_label.yview)
+
+        # Setting the scroll event for the label
+        self.result_label.configure(yscrollcommand=self._result_scroll.set, state=tk.DISABLED)
+        self.result_label.pack(expand=True,fill=tk.BOTH)
+        self.result_var.trace_add("write", self._sync_result_var_to_text)
+        self._bind_mousewheel(self.result_label)
+
+        result_w = self.assets["279_result_field"].width() - 40
+        result_h = self.assets["279_result_field"].height() - 40
+        center_result_bg_offset = (self.assets["279_result_field"].height()//2)
+
+        self.result_background = self.canvas_full.create_image(x_axis, y_item_offset,image=self.assets["279_result_field"],anchor="n")
+
         self.result_window_id = self.canvas_full.create_window(
             x_axis, 
             y_item_offset + center_result_bg_offset,
             width=result_w,
             height=result_h,
-            window=self.result_label,
+            window=self.result_frame,
         )
+    
+    def _sync_result_var_to_text(self,  *_):
+        self.set_result(self.result_var.get())
+
+    def set_result(self, txt):
+        self.result_label.config(state=tk.NORMAL)
+        self.result_label.delete("1.0", "end")
+        self.result_label.insert("end",txt or "")
+        self.result_label.see("end")
+        self.result_label.configure(state=tk.DISABLED)
+
+    def _bind_mousewheel(self, widget):
+        # Windows / macOS
+        widget.bind("<MouseWheel>", self._on_mousewheel, add="+")
+        # Linux (X11)
+        widget.bind("<Button-4>", self._on_mousewheel, add="+")
+        widget.bind("<Button-5>", self._on_mousewheel, add="+")
+
+    def _on_mousewheel(self, event):
+        if event.num == 4:          # Linux scroll up
+            self.result_field_label.yview_scroll(-2, "units")
+        elif event.num == 5:        # Linux scroll down
+            self.result_field_label.yview_scroll(2, "units")
+        else:                       # Windows/macOS
+            delta = int(-1 * (event.delta / 120))
+            self.result_field_label.yview_scroll(delta, "units")
+        return "break"
+    
+    # Entry field event
+    def _bind_entry_field(self, tk_entry: tk.Entry, entry_bg_tag, normal:str, focus:str):
+        def on_focus_in(event):
+            self.canvas_full.itemconfig(entry_bg_tag, image=self.assets[focus])
+
+        def on_focus_out(event):
+            self.canvas_full.itemconfig(entry_bg_tag, image=self.assets[normal])
+
+        tk_entry.bind("<FocusIn>", on_focus_in)
+        tk_entry.bind("<FocusOut>", on_focus_out)
+
+        # On Key Enter
+        def on_key_enter(event):
+            # self.canvas_full.focus_set()  # Remove focus from entry field
+            # Emit the entered value
+            value = tk_entry.get()
+            self.emit_msg(f"Entry field submitted with value: {value}")
+
+        tk_entry.bind("<Return>", on_key_enter)
 
     def build_events(self):
-
+        self._bind_entry_field(
+            self.n_entry,
+            "entry_background",
+            "279_entry_field_normal",
+            "279_entry_field_focused"
+        )
         self._bind_button(
             "start_button",
             self.start_button_id,
             normal="button_start_normal",
             hover="button_start_hover",
             active="button_start_active",
-            command=None
+            command=self.on_start_clicked
         )
 
         self._bind_button(
@@ -185,7 +261,7 @@ class LeetCode204_Gui:
             normal="button_cancel_normal",
             hover="button_cancel_hover",
             active="button_cancel_active",
-            command=None
+            command=self.on_cancel_clicked
         )
 
     def _bind_button(self, tag:str, item_id: int, normal:str, hover:str,active:str,command=None):
@@ -239,98 +315,68 @@ class LeetCode204_Gui:
         self.canvas_full.tag_bind(tag, "<ButtonPress-1>", on_press)
         self.canvas_full.tag_bind(tag, "<ButtonRelease-1>", on_release)
 
+    def on_start_clicked(self):
+        if self._running:
+            return
+        
+        self._running = True
 
-    # Build tạm thời một block entry cố định (không tái sử dụng được thành nhiều entry)
-    def build_entry_block(self, x: int, y: int,
-                      img_normal_key: str,
-                      img_focus_key: str,
-                      img_disabled_key: str,
-                      width: int = 420,
-                      height: int = 26):
-        # lưu keys để đổi ảnh
-        self._entry_img = {
-            "normal": img_normal_key,
-            "focus": img_focus_key,
-            "disabled": img_disabled_key,
-        }
-        self._entry_disabled = False
-
-        # 1) vẽ ảnh nền entry trên canvas
-        self.entry_bg_id = self.canvas_full.create_image(
-            x, y, anchor="center", image=self.assets[img_normal_key], tags=("entry_bg",)
-        )
-
-        # 2) tạo Entry thật
-        self.var_n = tk.StringVar()
-        self.ent_n = tk.Entry(
-            self.root,
-            textvariable=self.var_n,
-            bd=0,
-            relief="flat",
-            highlightthickness=0,
-        )
-
-        # 3) đặt Entry lên canvas (window item)
-        self.ent_win_id = self.canvas_full.create_window(
-            x, y, anchor="center", width=width, height=height, window=self.ent_n, tags=("entry_win",)
-        )
-
-        # 4) bind focus in/out
-        self.ent_n.bind("<FocusIn>", self._entry_on_focus_in)
-        self.ent_n.bind("<FocusOut>", self._entry_on_focus_out)
-
-        # (tuỳ chọn) click vào ảnh nền cũng focus entry
-        self.canvas_full.tag_bind("entry_bg", "<Button-1>", lambda e: self.focus_entry())
-
-    def _set_entry_bg(self, state: str):
-        # nếu disabled thì luôn ưu tiên disabled
-        if self._entry_disabled:
-            self.canvas_full.itemconfig(self.entry_bg_id, image=self.assets[self._entry_img["disabled"]])
+        try:
+            n = int(self.n_entry.get().strip())
+            if n < 0:
+                return
+            if n > 50_000_000:
+                return
+        except:
             return
 
-        if state == "focus":
-            self.canvas_full.itemconfig(self.entry_bg_id, image=self.assets[self._entry_img["focus"]])
+        self._task_handler = self.runner.submit(
+            func=countZ_primes,
+            kwargs={"n":n},
+            on_start=self._on_task_start,
+            on_success=self._on_task_success,
+            on_error=self._on_task_error,
+            on_finally=self._on_task_finally,
+            on_progress=self._on_task_progress,
+        )
+    def on_cancel_clicked(self):
+         # self.emit_msg("Cancel button clicked.")
+        if self._task_handler and self._running:
+            self.emit_msg("Cancelling the running task...")
+            self.runner.cancel(self._task_handler)  # set handle.cancel_event
         else:
-            self.canvas_full.itemconfig(self.entry_bg_id, image=self.assets[self._entry_img["normal"]])
+            self.emit_msg("Không có tác vụ nào đang chạy để hủy.")
 
-    def _entry_on_focus_in(self, _e):
-        self._set_entry_bg("focus")
 
-    def _entry_on_focus_out(self, _e):
-        self._set_entry_bg("normal")
+    def _on_task_start(self, meta):
+        pass
 
-    def focus_entry(self):
-        if not self._entry_disabled:
-            self.ent_n.focus_set()
+    def _on_task_success(self, payload, meta):
+        self.emit_msg(f"payload: {payload} meta: {meta}")
+        pass
 
-    def disable_entry(self):
-        self._entry_disabled = True
-        self.ent_n.config(state="disabled")
-        self._set_entry_bg("disabled")
+    def _on_task_error(self, payload, meta):
+        pass
 
-    def enable_entry(self):
-        self._entry_disabled = False
-        self.ent_n.config(state="normal")
-        # nếu đang focus thì hiện focus, không thì normal
-        if self.ent_n == self.root.focus_get():
-            self._set_entry_bg("focus")
-        else:
-            self._set_entry_bg("normal")
+    def _on_task_finally(self, status, meta):
+        self._running = False
+        # self.emit_msg(f"Task {status}: {meta}")
+        self._task_handler = None
+
+    def _on_task_progress(self, payload):
+        percentage = payload.get("pct", 0)
+        self.emit_msg(percentage)
 
     def _pump_logs(self):
         # Safely grab any new log entries since last index and append them
         # to the result_var. The shared buffer is a List[str], so slice from
         # _log_last_idx to the end and advance by the number of entries.
         with self._log_lock:
-            # slicing is safe even if _log_last_idx > len(self.log_buffer)
-            logs = list(self.log_buffer[self._log_last_idx:])
-            if logs:
-                existing_text = self.result_var.get()
-                appended = "\n".join(logs)
-                # if there is existing text, add a newline separator first
-                new_text = existing_text + ("\n" if existing_text else "") + appended
-                self.result_var.set(new_text)
-                self._log_last_idx += len(logs)
+            buf_len = len(self.log_buffer)
+
+            new_logs = self.log_buffer[buf_len-1:]
+            if new_logs:
+                self.result_var.set("\n".join(new_logs))
 
         # Schedule next pump
         try:
