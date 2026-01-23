@@ -28,11 +28,11 @@ class ListLogHandler(logging.Handler):
         except Exception:
             self.handleError(record)
 
-def build_log_buffer(name: str = "LASERLINK", level=logging.DEBUG, *, max_buffer: int = 500) -> Tuple[logging.Logger, List[str]]:
+def build_log_buffer(name: str = "BUILT_BUFFER", level=logging.DEBUG, *, max_buffer: int = 500) -> Tuple[logging.Logger, List[str]]:
     logger = logging.getLogger(name=name)
 
-    if getattr(logger, "_laserlink_inited", False):
-        return logger, getattr(logger, "_laserlink_buffer")
+    if getattr(logger, "_built_buffer_inited", False):
+        return logger, getattr(logger, "_built_buffer")
 
     logger.setLevel(level)
     logger.propagate = False
@@ -51,9 +51,9 @@ def build_log_buffer(name: str = "LASERLINK", level=logging.DEBUG, *, max_buffer
     logger.addHandler(list_handler)
     logger.addHandler(stdout_handler)
 
-    logger._laserlink_inited = True
-    logger._laserlink_buffer = log_buffer
-    logger._laserlink_lock = lock   # <-- GUI sẽ dùng lock này
+    logger._built_buffer_inited = True
+    logger._built_buffer = log_buffer
+    logger._built_lock = lock   # <-- GUI sẽ dùng lock này
 
     return logger, log_buffer
 
