@@ -1,0 +1,26 @@
+,fixture,action,command,expected_ok,notes
+66,ADL2 - Goldfish (windows),close,,CLOSE_OK / Close ok / OK,tùy fixture
+72,ADL2 - Goldfish (windows),emergency_stop,,STOP! / EMC....,STOP! có thể là response
+77,ADL2 - Goldfish (windows),help,,command list,
+67,ADL2 - Goldfish (windows),in,,(vendor-specific),
+65,ADL2 - Goldfish (windows),open,,OPEN_OK / Open ok / OK,tùy fixture
+68,ADL2 - Goldfish (windows),out,,(vendor-specific),
+75,ADL2 - Goldfish (windows),product,,product OK,
+73,ADL2 - Goldfish (windows),reset,,RESET_OK / STOP!RESET_OK,nếu có
+74,ADL2 - Goldfish (windows),state,,string state,
+76,ADL2 - Goldfish (windows),version,,version string,
+1,CuteCom Opened - Can receive data when worker press button in out,close,CLOSE,CLOSE_OK / Close ok / OK,tùy fixture
+27,CuteCom Opened - Can receive data when worker press button in out,close,CLOSE,CLOSE_OK / Close ok / OK,tùy fixture
+7,CuteCom Opened - Can receive data when worker press button in out,emergency_stop,FIX_ACTION_STOP,STOP! / EMC....,STOP! có thể là response
+33,CuteCom Opened - Can receive data when worker press button in out,emergency_stop,FIX_ACTION_STOP,STOP! / EMC....,STOP! có thể là response
+4,CuteCom Opened - Can receive data when worker press button in out,empty_in,EMPTY_IN,(vendor-specific),
+30,CuteCom Opened - Can receive data when worker press button in out,empty_in,EMPTY_IN,(vendor-specific),
+12,CuteCom Opened - Can receive data when worker press button in out,help,?,command list,
+38,CuteCom Opened - Can receive data when worker press button in out,help,?,command list,
+2,CuteCom Opened - Can receive data when worker press button in out,in,IN,(vendor-specific),
+28,CuteCom Opened - Can receive data when worker press button in out,in,IN,(vendor-specific),
+0,CuteCom Opened - Can receive data when worker press button in out,open,OPEN,OPEN_OK / Open ok / OK,tùy fixture
+26,CuteCom Opened - Can receive data when worker press button in out,open,OPEN,OPEN_OK / Open ok / OK,tùy fixture
+3,CuteCom Opened - Can receive data when worker press button in out,out,OUT,(vendor-specific),
+29,CuteCom Opened - Can receive data when worker press button in out,out,OUT,(vendor-specific),
+6,CuteCom Opened - Can receive data when worker press button in out,plug_down,POGOPIN_OUT,,pogo/plug down

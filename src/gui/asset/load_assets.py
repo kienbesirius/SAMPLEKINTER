@@ -29,6 +29,7 @@ except:
 
 ICON_ASSET = {
     "app_icon": ICONS_PATH / "treasure-svgrepo-com.ico",
+    "check_fixture_icon": ICONS_PATH / "delphi-svgrepo-com.ico"
 }
 
 FONT_ASSET = {

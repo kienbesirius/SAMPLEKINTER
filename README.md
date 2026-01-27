@@ -1,3 +1,18 @@
+# Check Fixture Logic
+### Tạo app giao diện yêu cầu kiểm tra
+- Kiểm tra IN-OUT
+- Kiểm tra Force STOP 
+- Kiểm tra Reset nếu có 
+
+`Những yêu cầu kiểm tra trên đảm bảo rằng công nhân tại chỗ có thể tự mình kiểm tra điều kiện an toàn và điều kiện cơ bản nhất của Fixture để tiến hành Testing Device`
+### Tạo service hỗ trợ lịch trình
+- Một service hỗ trợ mở `Fixture-Check-App` theo lịch định sẵn như 6 sáng tối mỗi ngày mở lên một lần
+- Tự động mở lại `Fixture-Check-App` khi app bị tắt dừng đột ngột. 
+- `Fixture-Check-App` khi hoàn thành kiểm tra Fixture sẽ gửi một tín hiệu `Hoàn thành` cho service để dừng tự động mở lại.
+- Service sẽ chỉ mở app theo lịch trình - và `spam re-launch app` nếu chưa có tín hiệu hoàn thành của lịch trình gần nhất. 
+- Service sẽ được start-up - và mặc định là sau start up là phải `launch app` một lần bất kể lịch trình. 
+- Sau start-up và nhân được tín hiệu `Hoàn thành` => service về đúng quỹ đạo mở app theo lịch giờ.
+
 # LeetCode279: Perfect Squares
 ![LeetCode279-Design ](src/assets/resources/gui279_perfect_squares/LeetCode279-design-tkapp.png)
 *(Đảm bảo rằng file ảnh nằm đúng vị trí: `src/assets/resources/gui279_perfect_squares/LeetCode279-design-tkapp.png`)*
@@ -25,6 +40,7 @@
 | **tkinterdnd2**  |      0.4.3 | Drag & Drop cho Tkinter                            |
 | **pyglet**       |     2.1.12 | Multimedia / windowing                             |
 | **Pillow (PIL)** |     12.1.0 | Xử lý ảnh (thư mục `PIL`)                          |
+| **screeninfo**   |     12.1.0 | Xử lý đa màn hình                                  |
 
 ---
 
