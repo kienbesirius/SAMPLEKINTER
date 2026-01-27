@@ -222,16 +222,29 @@ class AppGUI:
         # Build GUI - Bind Events - Pump Logs
         # self._init_ui()
 
-        self.widgets_main = self._build_ui_on(
-            win=self.root,
-            canvas=self._canvas,
-            sw=self.screen_width,
-            sh=self.screen_height,
-        )
+        # self.widgets_main = self._build_ui_on(
+        #     win=self.root,
+        #     canvas=self._canvas,
+        #     sw=self.screen_width,
+        #     sh=self.screen_height,
+        # )
 
-        # nếu code khác vẫn cần self.entry_1/self.result_var:
-        self.entry_1 = self.widgets_main["entry"]
-        self.result_var = self.widgets_main["logs"]
+        # # nếu code khác vẫn cần self.entry_1/self.result_var:
+        # self.entry_1 = self.widgets_main["entry"]
+        # self.result_var = self.widgets_main["logs"]
+
+        # TODO: Create UI for testing fixture
+
+        # Phase Statuses
+        self.COMX_status = False  # or "Connected", "Error", etc.
+        self.PHASE_1_IN_STATUS = False
+        self.PHASE_1_OUT_STATUS = False
+        self.PHASE_2_FORCE_STOP_STATUS = False
+        self.PHASE_3_RESET_STATUS = False
+        self.APP_TITLE = "KIỂM TRA FIXTURE"
+        self.GUIDE_TEXT = "Vui lòng thực hiện theo hướng dẫn dưới đây!"
+
+
 
         self._binding_events()
         self._pump_log_buffer()
@@ -240,160 +253,164 @@ class AppGUI:
         fullscreen_on_monitor(self.root, self.current_window)
 
         self.create_extra_windows()
+    
+    # TODO: Create UI for testing fixture
+    def _init_phase_test(self):
+        pass
 
-    def _init_ui(self):
-        # TODO: Initialize UI components here
-        # center and layout based on current screen size (fullscreen)
-        x_axis = self.screen_width // 2
-        y_axis = self.screen_height // 2
-        y_item_offset = 60
-        try:
+    # def _init_ui(self):
+    #     # : Initialize UI components here
+    #     # center and layout based on current screen size (fullscreen)
+    #     x_axis = self.screen_width // 2
+    #     y_axis = self.screen_height // 2
+    #     y_item_offset = 60
+    #     try:
             
-            self.button_sample = bind_canvas_button(
-                root=self.root,
-                canvas=self._canvas,
-                assets=self.assets,
-                tag="btn_example",
-                x=x_axis + self.assets["button_normal"].width()//2,
-                y=y_item_offset,
-                normal_status="button_normal",
-                hover_status="button_hover",
-                active_status="button_active",
-                disabled_status="button_disabled",  # nếu có; không có thì dùng chung button_disabled
-                text="START",
-                text_font=self.tektur_font,
-                command=lambda: self.entry_1.configure(state="normal"),
-                cooldown_ms=500,
-            )
+    #         self.button_sample = bind_canvas_button(
+    #             root=self.root,
+    #             canvas=self._canvas,
+    #             assets=self.assets,
+    #             tag="btn_example",
+    #             x=x_axis + self.assets["button_normal"].width()//2,
+    #             y=y_item_offset,
+    #             normal_status="button_normal",
+    #             hover_status="button_hover",
+    #             active_status="button_active",
+    #             disabled_status="button_disabled",  # nếu có; không có thì dùng chung button_disabled
+    #             text="START",
+    #             text_font=self.tektur_font,
+    #             command=lambda: self.entry_1.configure(state="normal"),
+    #             cooldown_ms=500,
+    #         )
 
-            self.button_sample2 = bind_canvas_button(
-                root=self.root,
-                canvas=self._canvas,
-                assets=self.assets,
-                tag="btn_example2",
-                x=x_axis - self.assets["button_normal"].width()//2,
-                y=y_item_offset,
-                normal_status="button_normal",
-                hover_status="button_hover",
-                active_status="button_active",
-                disabled_status="button_disabled",  # nếu có; không có thì dùng chung button_disabled
-                text="CANCEL",
-                text_font=self.tektur_font,
-                command=lambda: self.entry_1.configure(state="disabled"),
-                cooldown_ms=500,
-            )
+    #         self.button_sample2 = bind_canvas_button(
+    #             root=self.root,
+    #             canvas=self._canvas,
+    #             assets=self.assets,
+    #             tag="btn_example2",
+    #             x=x_axis - self.assets["button_normal"].width()//2,
+    #             y=y_item_offset,
+    #             normal_status="button_normal",
+    #             hover_status="button_hover",
+    #             active_status="button_active",
+    #             disabled_status="button_disabled",  # nếu có; không có thì dùng chung button_disabled
+    #             text="CANCEL",
+    #             text_font=self.tektur_font,
+    #             command=lambda: self.entry_1.configure(state="disabled"),
+    #             cooldown_ms=500,
+    #         )
 
-            self.emit_msg("Init UI...")
+    #         self.emit_msg("Init UI...")
 
-            self.entry_1 = bind_canvas_entry(
-                root=self.root,
-                canvas=self._canvas,
-                assets=self.assets,
-                x=x_axis,
-                y=y_item_offset + 90,
-                name="username",
-                field_label="Username",
-                placeholder="Nhập username...",
-                font=self.tektur_font,
-                on_submit=lambda s: self.emit_msg(f"submit username: {s}"),
-                state="normal",
-            )
+    #         self.entry_1 = bind_canvas_entry(
+    #             root=self.root,
+    #             canvas=self._canvas,
+    #             assets=self.assets,
+    #             x=x_axis,
+    #             y=y_item_offset + 90,
+    #             name="username",
+    #             field_label="Username",
+    #             placeholder="Nhập username...",
+    #             font=self.tektur_font,
+    #             on_submit=lambda s: self.emit_msg(f"submit username: {s}"),
+    #             state="normal",
+    #         )
 
-            self.result_var = bind_canvas_text_area(
-                root=self.root,
-                canvas=self._canvas,
-                assets=self.assets,
-                x=x_axis,
-                y=y_item_offset +130,
-                bg_key="279_result_field",
-                name="logs",
-                anchor="n",
-                readonly=True,
-                auto_scroll=True,
-                max_lines=500,
-            )
+    #         self.result_var = bind_canvas_text_area(
+    #             root=self.root,
+    #             canvas=self._canvas,
+    #             assets=self.assets,
+    #             x=x_axis,
+    #             y=y_item_offset +130,
+    #             bg_key="279_result_field",
+    #             name="logs",
+    #             anchor="n",
+    #             readonly=True,
+    #             auto_scroll=True,
+    #             max_lines=500,
+    #         )
 
-            # append log:
-            self.result_var.append("~/ hello")   # nhanh
+    #         # append log:
+    #         self.result_var.append("~/ hello")   # nhanh
 
-            self._is_closing_all = False
-            self.root.protocol("WM_DELETE_WINDOW", lambda: self._close_all_windows(self.root))
+    #         self._is_closing_all = False
+    #         self.root.protocol("WM_DELETE_WINDOW", lambda: self._close_all_windows(self.root))
 
-        except Exception as e:
-            self.emit_msg(f"Error initializing UI: {e}")
-            raise
+    #     except Exception as e:
+    #         self.emit_msg(f"Error initializing UI: {e}")
+    #         raise
 
 
-    def _build_ui_on(self, *, win: tk.Misc, canvas: tk.Canvas, sw: int, sh: int):
-        x_axis = sw // 2
-        y_item_offset = 60
+    # def _build_ui_on(self, *, win: tk.Misc, canvas: tk.Canvas, sw: int, sh: int):
+    #     x_axis = sw // 2
+    #     y_item_offset = 60
 
-        # Entry (mỗi window có entry riêng)
-        entry = bind_canvas_entry(
-            root=win,
-            canvas=canvas,
-            assets=self.assets,
-            x=x_axis,
-            y=y_item_offset + 90,
-            name="username",
-            field_label="Username",
-            placeholder="Nhập username...",
-            font=self.tektur_font,
-            on_submit=lambda s: self.emit_msg(f"[{win.winfo_name()}] submit username: {s}"),
-            state="normal",
-        )
+    #     # Entry (mỗi window có entry riêng)
+    #     entry = bind_canvas_entry(
+    #         root=win,
+    #         canvas=canvas,
+    #         assets=self.assets,
+    #         x=x_axis,
+    #         y=y_item_offset + 90,
+    #         name="username",
+    #         field_label="Username",
+    #         placeholder="Nhập username...",
+    #         font=self.tektur_font,
+    #         on_submit=lambda s: self.emit_msg(f"[{win.winfo_name()}] submit username: {s}"),
+    #         state="normal",
+    #     )
 
-        # Buttons (command phải thao tác entry của CHÍNH window đó, không dùng self.entry_1)
-        btn_start = bind_canvas_button(
-            root=win,
-            canvas=canvas,
-            assets=self.assets,
-            tag="btn_example",
-            x=x_axis + self.assets["button_normal"].width() // 2,
-            y=y_item_offset,
-            normal_status="button_normal",
-            hover_status="button_hover",
-            active_status="button_active",
-            disabled_status="button_disabled",
-            text="START",
-            text_font=self.tektur_font,
-            command=lambda w=win: self.on_start(w),
-            cooldown_ms=500,
-        )
+    #     # Buttons (command phải thao tác entry của CHÍNH window đó, không dùng self.entry_1)
+    #     btn_start = bind_canvas_button(
+    #         root=win,
+    #         canvas=canvas,
+    #         assets=self.assets,
+    #         tag="btn_example",
+    #         x=x_axis + self.assets["button_normal"].width() // 2,
+    #         y=y_item_offset,
+    #         normal_status="button_normal",
+    #         hover_status="button_hover",
+    #         active_status="button_active",
+    #         disabled_status="button_disabled",
+    #         text="START",
+    #         text_font=self.tektur_font,
+    #         command=lambda w=win: self.on_start(w),
+    #         cooldown_ms=500,
+    #     )
 
-        btn_cancel = bind_canvas_button(
-            root=win,
-            canvas=canvas,
-            assets=self.assets,
-            tag="btn_example2",
-            x=x_axis - self.assets["button_normal"].width() // 2,
-            y=y_item_offset,
-            normal_status="button_normal",
-            hover_status="button_hover",
-            active_status="button_active",
-            disabled_status="button_disabled",
-            text="CANCEL",
-            text_font=self.tektur_font,
-            command=lambda w=win: self.on_cancel(w),
-            cooldown_ms=500,
-        )
+    #     btn_cancel = bind_canvas_button(
+    #         root=win,
+    #         canvas=canvas,
+    #         assets=self.assets,
+    #         tag="btn_example2",
+    #         x=x_axis - self.assets["button_normal"].width() // 2,
+    #         y=y_item_offset,
+    #         normal_status="button_normal",
+    #         hover_status="button_hover",
+    #         active_status="button_active",
+    #         disabled_status="button_disabled",
+    #         text="CANCEL",
+    #         text_font=self.tektur_font,
+    #         command=lambda w=win: self.on_cancel(w),
+    #         cooldown_ms=500,
+    #     )
 
-        # Logs area
-        logs = bind_canvas_text_area(
-            root=win,
-            canvas=canvas,
-            assets=self.assets,
-            x=x_axis,
-            y=y_item_offset + 130,
-            bg_key="279_result_field",
-            name="logs",
-            anchor="n",
-            readonly=True,
-            auto_scroll=True,
-            max_lines=500,
-        )
+    #     # Logs area
+    #     logs = bind_canvas_text_area(
+    #         root=win,
+    #         canvas=canvas,
+    #         assets=self.assets,
+    #         x=x_axis,
+    #         y=y_item_offset + 130,
+    #         bg_key="279_result_field",
+    #         name="logs",
+    #         anchor="n",
+    #         readonly=True,
+    #         auto_scroll=True,
+    #         max_lines=500,
+    #     )
 
-        return {"entry": entry, "btn_start": btn_start, "btn_cancel": btn_cancel, "logs": logs}
+    #     return {"entry": entry, "btn_start": btn_start, "btn_cancel": btn_cancel, "logs": logs}
 
     def _pump_log_buffer(self):
         try:
@@ -418,6 +435,7 @@ class AppGUI:
         except Exception as e:
             pass
     
+    # Broadcasting event 
     def _get_widgets(self, win: tk.Misc) -> dict:
         if win is self.root:
             return self.widgets_main
@@ -434,18 +452,21 @@ class AppGUI:
                 pass
 
     def _apply_start(self, win: tk.Misc):
+        # TODO: Need to modify
         ws = self._get_widgets(win)
         entry = ws.get("entry")
         if entry:
             entry.configure(state="normal")
 
     def _apply_cancel(self, win: tk.Misc):
+        # TODO: Need to modify
         ws = self._get_widgets(win)
         entry = ws.get("entry")
         if entry:
             entry.configure(state="disabled")
 
     def on_start(self, source_win: tk.Misc):
+        # TODO: Need to modify
         # 1) xử lý window hiện tại
         self._apply_start(source_win)
         # 2) broadcast sang các window khác
@@ -455,6 +476,7 @@ class AppGUI:
             self._apply_start(w)
 
     def on_cancel(self, source_win: tk.Misc):
+        # TODO: Need to modify
         self._apply_cancel(source_win)
         for w in self._iter_windows():
             if w is source_win:
