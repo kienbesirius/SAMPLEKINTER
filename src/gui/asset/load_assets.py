@@ -40,6 +40,128 @@ FONT_ASSET = {
 }
 
 ASSET_FILES = {
+
+    # Fixture design
+    "fixture_button_confirm_normal_0.5": RESOURCE_PATH / "fixture" / "button_confirm_0_5.png",
+    "fixture_button_confirm_hover_0.5": RESOURCE_PATH / "fixture" / "button_confirm_hover_0_5.png",
+    "fixture_button_confirm_pressed_0.5": RESOURCE_PATH / "fixture" / "button_confirm_pressed_0_5.png",
+    "fixture_button_confirm_disabled_0.5": RESOURCE_PATH / "fixture" / "button_confirm_disabled_0_5.png",
+
+    "fixture_button_confirm_normal_0.75": RESOURCE_PATH / "fixture" / "button_confirm_0_75.png",
+    "fixture_button_confirm_hover_0.75": RESOURCE_PATH / "fixture" / "button_confirm_hover_0_75.png",
+    "fixture_button_confirm_pressed_0.75": RESOURCE_PATH / "fixture" / "button_confirm_pressed_0_75.png",
+    "fixture_button_confirm_disabled_0.75": RESOURCE_PATH / "fixture" / "button_confirm_disabled_0_75.png",
+
+    "fixture_button_confirm_normal": RESOURCE_PATH / "fixture" / "button_confirm.png",
+    "fixture_button_confirm_hover": RESOURCE_PATH / "fixture" / "button_confirm_hover.png",
+    "fixture_button_confirm_pressed": RESOURCE_PATH / "fixture" / "button_confirm_pressed.png",
+    "fixture_button_confirm_disabled": RESOURCE_PATH / "fixture" / "button_confirm_disabled.png",
+
+    # Arrow _0.5 _0_5
+    "fixture_arrow_to_right_0.5": RESOURCE_PATH / "fixture" / "arrow_to_right_0_5.png",
+    "fixture_arrow_to_left_0.5": RESOURCE_PATH / "fixture" / "arrow_to_left_0_5.png",
+    "fixture_dock_check_0.5": RESOURCE_PATH / "fixture" / "DOCK_CHECK_0_5.png",
+    # Arrow _0.75 _0_75
+    "fixture_arrow_to_right_0.75": RESOURCE_PATH / "fixture" / "arrow_to_right_0_75.png",
+    "fixture_arrow_to_left_0.75": RESOURCE_PATH / "fixture" / "arrow_to_left_0_75.png",
+    "fixture_dock_check_0.75": RESOURCE_PATH / "fixture" / "DOCK_CHECK_0_75.png",
+
+    "fixture_arrow_to_right": RESOURCE_PATH / "fixture" / "arrow_to_right.png",
+    "fixture_arrow_to_left": RESOURCE_PATH / "fixture" / "arrow_to_left.png",
+    "fixture_dock_check": RESOURCE_PATH / "fixture" / "DOCK_CHECK.png",
+    
+    "fixture_slot_test_0.5": RESOURCE_PATH / "fixture" / "slot_test_0_5.png",
+    "fixture_slot_test_idle_0.5": RESOURCE_PATH / "fixture" / "slot_test_0_5.png",
+    "fixture_slot_test_fail_0.5": RESOURCE_PATH / "fixture" / "slot_test_fail_0_5.png",
+    "fixture_slot_test_pass_0.5": RESOURCE_PATH / "fixture" / "slot_test_pass_0_5.png",
+    "fixture_slot_test_testing_0.5": RESOURCE_PATH / "fixture" / "slot_test_stand_by_0_5.png",
+
+    "fixture_slot_test_0.75": RESOURCE_PATH / "fixture" / "slot_test_0_75.png",
+    "fixture_slot_test_idle_0.75": RESOURCE_PATH / "fixture" / "slot_test_0_75.png",
+    "fixture_slot_test_fail_0.75": RESOURCE_PATH / "fixture" / "slot_test_fail_0_75.png",
+    "fixture_slot_test_pass_0.75": RESOURCE_PATH / "fixture" / "slot_test_pass_0_75.png",
+    "fixture_slot_test_testing_0.75": RESOURCE_PATH / "fixture" / "slot_test_stand_by_0_75.png",
+
+    "fixture_slot_test": RESOURCE_PATH / "fixture" / "slot_test.png",
+    "fixture_slot_test_idle": RESOURCE_PATH / "fixture" / "slot_test.png",
+    "fixture_slot_test_fail": RESOURCE_PATH / "fixture" / "slot_test_fail.png",
+    "fixture_slot_test_pass": RESOURCE_PATH / "fixture" / "slot_test_pass.png",
+    "fixture_slot_test_testing": RESOURCE_PATH / "fixture" / "slot_test_stand_by.png",
+    
+    "fixture_info_frame_bg_333": RESOURCE_PATH / "fixture" / "info_frame_bg_333.png",
+    "fixture_info_frame_bg_337": RESOURCE_PATH / "fixture" / "info_frame_bg_337.png",
+    "fixture_info_frame_bg_480": RESOURCE_PATH / "fixture" / "info_frame_bg_480.png",
+    "fixture_info_frame_bg_640": RESOURCE_PATH / "fixture" / "info_frame_bg_640.png",
+
+    # _0.5 _0_5
+    "fixture_circle_dock_status_listening_0.5": RESOURCE_PATH / "fixture" / "COM_STATUS_LISTENING_0_5.png",
+    "fixture_circle_dock_status_stand_by_0.5": RESOURCE_PATH / "fixture" / "COM_STATUS_STAND_BY_0_5.png",
+    "fixture_circle_dock_status_not_found_0.5": RESOURCE_PATH / "fixture" / "COM_STATUS_NOT_FOUND_0_5.png",
+
+    # _0.75 _0_75
+    "fixture_circle_dock_status_listening_0.75": RESOURCE_PATH / "fixture" / "COM_STATUS_LISTENING_0_75.png",
+    "fixture_circle_dock_status_stand_by_0.75": RESOURCE_PATH / "fixture" / "COM_STATUS_STAND_BY_0_75.png",
+    "fixture_circle_dock_status_not_found_0.75": RESOURCE_PATH / "fixture" / "COM_STATUS_NOT_FOUND_0_75.png",
+    
+    "fixture_circle_dock_status_listening": RESOURCE_PATH / "fixture" / "COM_STATUS_LISTENING.png",
+    "fixture_circle_dock_status_stand_by": RESOURCE_PATH / "fixture" / "COM_STATUS_STAND_BY.png",
+    "fixture_circle_dock_status_not_found": RESOURCE_PATH / "fixture" / "COM_STATUS_NOT_FOUND.png",
+
+    # _0.5 _0_5
+    "fixture_text_com1_0.5": RESOURCE_PATH / "fixture" / "TEXT_COM1_0_5.png",
+    "fixture_text_com2_0.5": RESOURCE_PATH / "fixture" / "TEXT_COM2_0_5.png",
+    "fixture_text_com3_0.5": RESOURCE_PATH / "fixture" / "TEXT_COM3_0_5.png",
+    "fixture_text_com4_0.5": RESOURCE_PATH / "fixture" / "TEXT_COM4_0_5.png",
+    "fixture_text_com5_0.5": RESOURCE_PATH / "fixture" / "TEXT_COM5_0_5.png",
+    "fixture_text_com6_0.5": RESOURCE_PATH / "fixture" / "TEXT_COM6_0_5.png",
+    "fixture_text_com7_0.5": RESOURCE_PATH / "fixture" / "TEXT_COM7_0_5.png",
+    "fixture_text_com8_0.5": RESOURCE_PATH / "fixture" / "TEXT_COM8_0_5.png",
+    "fixture_text_com9_0.5": RESOURCE_PATH / "fixture" / "TEXT_COM9_0_5.png",
+    "fixture_text_com10_0.5": RESOURCE_PATH / "fixture" / "TEXT_COM10_0_5.png",
+    "fixture_text_com11_0.5": RESOURCE_PATH / "fixture" / "TEXT_COM11_0_5.png",
+    "fixture_text_com12_0.5": RESOURCE_PATH / "fixture" / "TEXT_COM12_0_5.png", 
+    "fixture_text_com13_0.5": RESOURCE_PATH / "fixture" / "TEXT_COM13_0_5.png",
+    "fixture_text_com14_0.5": RESOURCE_PATH / "fixture" / "TEXT_COM14_0_5.png",
+    "fixture_text_com15_0.5": RESOURCE_PATH / "fixture" / "TEXT_COM15_0_5.png",
+    "fixture_text_com16_0.5": RESOURCE_PATH / "fixture" / "TEXT_COM16_0_5.png",
+    "fixture_text_com17_0.5": RESOURCE_PATH / "fixture" / "TEXT_COM17_0_5.png",
+    
+    # _0.75 _0_75
+    "fixture_text_com1_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM1_0_75.png",
+    "fixture_text_com2_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM2_0_75.png",
+    "fixture_text_com3_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM3_0_75.png",
+    "fixture_text_com4_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM4_0_75.png",
+    "fixture_text_com5_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM5_0_75.png",
+    "fixture_text_com6_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM6_0_75.png",
+    "fixture_text_com7_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM7_0_75.png",
+    "fixture_text_com8_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM8_0_75.png",
+    "fixture_text_com9_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM9_0_75.png",
+    "fixture_text_com10_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM10_0_75.png",
+    "fixture_text_com11_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM11_0_75.png",
+    "fixture_text_com12_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM12_0_75.png", 
+    "fixture_text_com13_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM13_0_75.png",
+    "fixture_text_com14_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM14_0_75.png",
+    "fixture_text_com15_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM15_0_75.png",
+    "fixture_text_com16_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM16_0_75.png",
+    "fixture_text_com17_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM17_0_75.png",
+
+    "fixture_text_com1": RESOURCE_PATH / "fixture" / "TEXT_COM1.png",
+    "fixture_text_com2": RESOURCE_PATH / "fixture" / "TEXT_COM2.png",
+    "fixture_text_com3": RESOURCE_PATH / "fixture" / "TEXT_COM3.png",
+    "fixture_text_com4": RESOURCE_PATH / "fixture" / "TEXT_COM4.png",
+    "fixture_text_com5": RESOURCE_PATH / "fixture" / "TEXT_COM5.png",
+    "fixture_text_com6": RESOURCE_PATH / "fixture" / "TEXT_COM6.png",
+    "fixture_text_com7": RESOURCE_PATH / "fixture" / "TEXT_COM7.png",
+    "fixture_text_com8": RESOURCE_PATH / "fixture" / "TEXT_COM8.png",
+    "fixture_text_com9": RESOURCE_PATH / "fixture" / "TEXT_COM9.png",
+    "fixture_text_com10": RESOURCE_PATH / "fixture" / "TEXT_COM10.png",
+    "fixture_text_com11": RESOURCE_PATH / "fixture" / "TEXT_COM11.png",
+    "fixture_text_com12": RESOURCE_PATH / "fixture" / "TEXT_COM12.png", 
+    "fixture_text_com13": RESOURCE_PATH / "fixture" / "TEXT_COM13.png",
+    "fixture_text_com14": RESOURCE_PATH / "fixture" / "TEXT_COM14.png",
+    "fixture_text_com15": RESOURCE_PATH / "fixture" / "TEXT_COM15.png",
+    "fixture_text_com16": RESOURCE_PATH / "fixture" / "TEXT_COM16.png",
+    "fixture_text_com17": RESOURCE_PATH / "fixture" / "TEXT_COM17.png",
     # Blank design
     "button_normal": RESOURCE_PATH / "blank" / "button-normal.png",
     "button_hover": RESOURCE_PATH / "blank" / "button-hover.png",

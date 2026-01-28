@@ -16,6 +16,8 @@ from src.utils.buffer_logger import build_log_buffer
 from src.gui.widgets.button import bind_canvas_button
 from src.gui.widgets.entry import bind_canvas_entry
 from src.gui.widgets.text_area import bind_canvas_text_area
+from src.gui.widgets.fixture_check_slot_test import bind_fixture_check_slot_test
+from src.gui.widgets.fixture_circle_status import bind_fixture_circle_com_status
 from src.gui.fixture.fill_multiple_monitor import fullscreen_on_monitor, get_monitors, monitor_from_point
 
 import tkinter.font as tkfont
@@ -143,11 +145,11 @@ class AppGUI:
                 # Lấy size monitor trực tiếp
                 _, _, sw, sh = monitor_rect(monitor)
                 
-                canvas = tk.Canvas(win, bg="white", highlightthickness=0)
+                canvas = tk.Canvas(win, bg=self.background_color, highlightthickness=0)
                 canvas.pack(fill=tk.BOTH, expand=True)
 
                 # sw, sh = win.winfo_width(), win.winfo_height()
-                win._widgets = self._build_ui_on(win=win, canvas=canvas, sw=sw, sh=sh)
+                win._widgets = self._build_gui(win=win, canvas=canvas, sw=sw, sh=sh)
                 win.protocol("WM_DELETE_WINDOW", lambda w=win: self._close_all_windows(w))
 
                 self.roots_extra.append(win)
@@ -166,6 +168,7 @@ class AppGUI:
         self._is_task_running = False
 
         self.root = root
+        self.background_color = "#652200"
         
         # Get monitors
         self.monitors = get_monitors()
@@ -212,7 +215,7 @@ class AppGUI:
         topmost_window(self.root)
 
         # Main Canvas (use screen size when fullscreen)
-        self._canvas = tk.Canvas(self.root, bg="white", highlightthickness=0)
+        self._canvas = tk.Canvas(self.root, bg=self.background_color, highlightthickness=0)
         self._canvas.pack(fill=tk.BOTH, expand=True)
         self._btn_pressed = {}
         self._btn_disabled = {}
@@ -235,16 +238,69 @@ class AppGUI:
 
         # TODO: Create UI for testing fixture
 
-        # Phase Statuses
-        self.COMX_status = False  # or "Connected", "Error", etc.
-        self.PHASE_1_IN_STATUS = False
-        self.PHASE_1_OUT_STATUS = False
-        self.PHASE_2_FORCE_STOP_STATUS = False
-        self.PHASE_3_RESET_STATUS = False
-        self.APP_TITLE = "KIỂM TRA FIXTURE"
-        self.GUIDE_TEXT = "Vui lòng thực hiện theo hướng dẫn dưới đây!"
+        self.widgets_main = self._build_gui(win=self.root,
+            canvas=self._canvas,
+            sw=self.screen_width,
+            sh=self.screen_height,)
 
+        self.slot1 = bind_fixture_check_slot_test(
+            root=self.root,
+            canvas=self._canvas,
+            assets=self.assets,
+            tag="slot1_status",
+            x=200, y=120,
+            status="idle",
+            text="IN",
+            text_font=("Tektur", 11, "bold"),
+        )
 
+        self.slot1.configure(status="testing")
+        self.slot2 = bind_fixture_check_slot_test(
+            root=self.root,
+            canvas=self._canvas,
+            assets=self.assets,
+            tag="slot2_status",
+            x=200, y=220,
+            status="idle",
+            text="OUT",
+            text_font=("Tektur", 11, "bold"),
+        )
+
+        self.slot2.configure(status="pass")
+
+        self.slot3 = bind_fixture_check_slot_test(
+            root=self.root,
+            canvas=self._canvas,
+            assets=self.assets,
+            tag="slot3_status",
+            x=200, y=320,
+            status="idle",
+            text=f"FORCE\nSTOP",
+            text_font=("Tektur", 11, "bold"),
+        )
+        
+
+        self.com1 = bind_fixture_circle_com_status(
+            root=self.root,
+            canvas=self._canvas,
+            assets=self.assets,
+            tag="com1_status",
+            x=60, y=60,
+            label="COM1",          # nếu assets có 'com1' (hoặc 'COM1', 'TEXT_COM1', ...)
+            status="listening",
+        )
+
+        # đổi trạng thái
+        self.com1.set_status("not_found")
+        self.com1.set_status("listening")
+
+        # đổi label
+        self.com1.set_label("COM1")
+
+        # disable click
+        self.com1.set_disabled(True)
+
+        self.slot3.configure(status="fail")
 
         self._binding_events()
         self._pump_log_buffer()
@@ -255,8 +311,27 @@ class AppGUI:
         self.create_extra_windows()
     
     # TODO: Create UI for testing fixture
-    def _init_phase_test(self):
-        pass
+    def _build_gui(self, *, win: tk.Misc, canvas: tk.Canvas, sw: int, sh: int):
+        x_axis = sw // 2
+        y_item_offset = 60
+        
+        btn_start = bind_canvas_button(
+            root=win,
+            canvas=canvas,
+            assets=self.assets,
+            tag="btn_example",
+            x=x_axis,
+            y=y_item_offset,
+            normal_status="fixture_button_confirm_normal",
+            hover_status="fixture_button_confirm_hover",
+            active_status="fixture_button_confirm_pressed",
+            disabled_status="fixture_button_confirm_disabled",
+            text="",
+            text_font=self.tektur_font,
+            command=None,
+            cooldown_ms=500,
+        )
+        return {"btn_start": btn_start,}
 
     # def _init_ui(self):
     #     # : Initialize UI components here

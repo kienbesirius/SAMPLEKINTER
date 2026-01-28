@@ -347,6 +347,20 @@ def bind_canvas_button(
         # đổi text/command lúc runtime:
         self.btn_start.configure(text="RUN", command=self.on_start_clicked)
     """
+    if "fixture" in normal_status:
+        # Get canvas height width to define button skins
+        canvas_width = canvas.winfo_width()
+        if canvas_width <= 800:
+            normal_status += "_0.5"
+            hover_status += "_0.5"
+            active_status += "_0.5"
+            disabled_status += "_0.5"
+        elif canvas_width <= 1200:
+            normal_status += "_0.75"
+            hover_status += "_0.75"
+            active_status += "_0.75"
+            disabled_status += "_0.75"
+
     skins = ButtonSkins(
         normal=normal_status,
         hover=hover_status,
