@@ -243,65 +243,6 @@ class AppGUI:
             sw=self.screen_width,
             sh=self.screen_height,)
 
-        self.slot1 = bind_fixture_check_slot_test(
-            root=self.root,
-            canvas=self._canvas,
-            assets=self.assets,
-            tag="slot1_status",
-            x=200, y=120,
-            status="idle",
-            text="IN",
-            text_font=("Tektur", 11, "bold"),
-        )
-
-        self.slot1.configure(status="testing")
-        self.slot2 = bind_fixture_check_slot_test(
-            root=self.root,
-            canvas=self._canvas,
-            assets=self.assets,
-            tag="slot2_status",
-            x=200, y=220,
-            status="idle",
-            text="OUT",
-            text_font=("Tektur", 11, "bold"),
-        )
-
-        self.slot2.configure(status="pass")
-
-        self.slot3 = bind_fixture_check_slot_test(
-            root=self.root,
-            canvas=self._canvas,
-            assets=self.assets,
-            tag="slot3_status",
-            x=200, y=320,
-            status="idle",
-            text=f"FORCE\nSTOP",
-            text_font=("Tektur", 11, "bold"),
-        )
-        
-
-        self.com1 = bind_fixture_circle_com_status(
-            root=self.root,
-            canvas=self._canvas,
-            assets=self.assets,
-            tag="com1_status",
-            x=60, y=60,
-            label="COM1",          # nếu assets có 'com1' (hoặc 'COM1', 'TEXT_COM1', ...)
-            status="listening",
-        )
-
-        # đổi trạng thái
-        self.com1.set_status("not_found")
-        self.com1.set_status("listening")
-
-        # đổi label
-        self.com1.set_label("COM1")
-
-        # disable click
-        self.com1.set_disabled(True)
-
-        self.slot3.configure(status="fail")
-
         self._binding_events()
         self._pump_log_buffer()
 
@@ -312,26 +253,86 @@ class AppGUI:
     
     # TODO: Create UI for testing fixture
     def _build_gui(self, *, win: tk.Misc, canvas: tk.Canvas, sw: int, sh: int):
+        # layout
         x_axis = sw // 2
-        y_item_offset = 60
-        
+        y_top = 60
+
+        left_x = 200
+        slot_y1 = 120
+        slot_gap = 100
+
+        # --- button start ---
         btn_start = bind_canvas_button(
             root=win,
             canvas=canvas,
             assets=self.assets,
-            tag="btn_example",
+            tag="btn_start",
             x=x_axis,
-            y=y_item_offset,
+            y=y_top,
             normal_status="fixture_button_confirm_normal",
             hover_status="fixture_button_confirm_hover",
             active_status="fixture_button_confirm_pressed",
             disabled_status="fixture_button_confirm_disabled",
             text="",
             text_font=self.tektur_font,
-            command=None,
+            command=None,           # hoặc: lambda w=win: self.on_start(w)
             cooldown_ms=500,
         )
-        return {"btn_start": btn_start,}
+
+        # --- slots ---
+        slot1 = bind_fixture_check_slot_test(
+            root=win,
+            canvas=canvas,
+            assets=self.assets,
+            tag="slot1_status",
+            x=left_x, y=slot_y1,
+            status="testing",
+            text="IN",
+            text_font=("Tektur", 11, "bold"),
+        )
+
+        slot2 = bind_fixture_check_slot_test(
+            root=win,
+            canvas=canvas,
+            assets=self.assets,
+            tag="slot2_status",
+            x=left_x, y=slot_y1 + slot_gap,
+            status="pass",
+            text="OUT",
+            text_font=("Tektur", 11, "bold"),
+        )
+
+        slot3 = bind_fixture_check_slot_test(
+            root=win,
+            canvas=canvas,
+            assets=self.assets,
+            tag="slot3_status",
+            x=left_x, y=slot_y1 + slot_gap * 2,
+            status="fail",
+            text="FORCE\nSTOP",
+            text_font=("Tektur", 11, "bold"),
+        )
+
+        # --- COM status (dock origin) ---
+        com1 = bind_fixture_circle_com_status(
+            root=win,
+            canvas=canvas,
+            assets=self.assets,
+            tag="com1_status",
+            x=-2, y=0,          # (x,y) là gốc DOCK theo logic bạn mới muốn
+            label="COM1",
+            status="listening",
+        )
+        com1.set_disabled(True)
+
+        return {
+            "btn_start": btn_start,
+            "slot1": slot1,
+            "slot2": slot2,
+            "slot3": slot3,
+            "com1": com1,
+        }
+
 
     # def _init_ui(self):
     #     # : Initialize UI components here

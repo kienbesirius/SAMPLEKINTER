@@ -191,12 +191,60 @@ class FixtureComStatus:
         cooldown_ms: int = 300,
         command: Command = None,
         cursor: str = "hand2",
+
+        dock_key: Optional[str] = "fixture_dock_check",  # <-- key assets cho DOCK_CHECK
+        dock_gap: int = 0,                               # <-- khoảng cách từ đáy circle tới dock
+        dock_dx: int = 0,                                # <-- offset X (nếu muốn lệch trái/phải)
+        dock_anchor: str = "nw",                          # <-- anchor cho dock (n = top)
+        dock_visible: bool = True,
+        circle_dx: int = 50,
+        circle_dy: int = 60,
     ) -> None:
         self.root = root
         self.canvas = canvas
         self.assets = assets
         self.tag = tag
         self.anchor = anchor
+
+        # origin (dock) position
+        self.ox = int(x)
+        self.oy = int(y)
+
+        # circle offset from origin
+        self.circle_dx = int(circle_dx)
+        self.circle_dy = int(circle_dy)
+
+        # dock config
+        self.dock_key = dock_key
+        self.dock_anchor = dock_anchor
+
+        # derived coords: circle center
+        cx = self.ox + self.circle_dx
+        cy = self.oy + self.circle_dy
+
+
+        # --- dock check (under circle) ---
+        self.dock_key = dock_key
+        self.dock_gap = int(dock_gap)
+        self.dock_dx = int(dock_dx)
+        self.dock_anchor = dock_anchor
+        self.dock_visible = bool(dock_visible)
+
+        self.dock_id: Optional[int] = None
+        self._dock_img_key: Optional[str] = None
+
+        if self.dock_key:
+            dk = _pick_scaled_key(self.canvas, self.assets, self.dock_key)
+            if dk in self.assets:
+                self._dock_img_key = dk
+                # tạo trước, lát nữa _reflow_layout sẽ đặt đúng vị trí
+                self.dock_id = self.canvas.create_image(
+                    self.ox, self.oy,
+                    image=self.assets[dk],
+                    anchor=self.dock_anchor,
+                    state=("normal" if self.dock_visible else "hidden"),
+                    tags=(self.tag, f"{self.tag}__dock"),
+                )
 
         self.skins = skins
         self._status: ComStatus = "not_found"
@@ -220,8 +268,7 @@ class FixtureComStatus:
         # --- background ---
         bg_key = self._status_to_bg_key(status)
         self.bg_id = self.canvas.create_image(
-            x,
-            y,
+            cx, cy,
             image=self.assets[bg_key],
             anchor=self.anchor,
             tags=(self.tag, f"{self.tag}__bg"),
@@ -239,14 +286,14 @@ class FixtureComStatus:
 
         # --- label: create BOTH image and text, then toggle ---
         self.label_img_id = self.canvas.create_image(
-            x, y,
+            cx, cy,
             image="",           # set later
             anchor="center",
             state="hidden",
             tags=(self.tag, f"{self.tag}__label_img"),
         )
         self.label_text_id = self.canvas.create_text(
-            x, y,
+            cx, cy,
             text="",
             font=self.label_font,
             fill=self.label_fill,
@@ -320,6 +367,22 @@ class FixtureComStatus:
             self.canvas.itemconfig(self.label_img_id, state="hidden")
             self.canvas.itemconfig(self.label_text_id, state="normal", text=self._label)
 
+    def set_origin(self, x: int, y: int):
+        self.ox = int(x)
+        self.oy = int(y)
+        cx = self.ox + self.circle_dx
+        cy = self.oy + self.circle_dy
+
+        # move dock
+        if self.dock_id is not None:
+            self.canvas.coords(self.dock_id, self.ox, self.oy)
+
+        # move circle + labels
+        self.canvas.coords(self.bg_id, cx, cy)
+        self.canvas.coords(self.label_img_id, cx, cy)
+        self.canvas.coords(self.label_text_id, cx, cy)
+
+
     def destroy(self):
         try:
             self.canvas.tag_unbind(self.tag, "<Enter>")
@@ -382,15 +445,33 @@ class FixtureComStatus:
             except Exception:
                 continue
         return False
+    
+    def _refresh_label_visual(self):
+        """
+        - Nếu tìm thấy fixture_text_comN_0.5/_0.75 -> show image label
+        - else -> show text label (wrap + center)
+        """
+        k = _find_fixture_text_com_key(self.assets, self.canvas, self._label)
+        self._label_img_key = k
 
-    def _status_to_bg_key(self, status: ComStatus) -> str:
-        if status == "listening":
+        if k is not None:
+            self.canvas.itemconfig(self.label_img_id, image=self.assets[k], state="normal")
+            self.canvas.itemconfig(self.label_text_id, state="hidden", text="")
+        else:
+            self.canvas.itemconfig(self.label_img_id, state="hidden")
+            self.canvas.itemconfig(self.label_text_id, state="normal", text=self._label)
+
+
+    def _status_to_bg_key(self, status: str | ComStatus) -> str:
+        st = _norm_status(str(status))
+        if st == "listening":
             base = self.skins.listening
-        elif status == "stand_by":
+        elif st == "stand_by":
             base = self.skins.stand_by
         else:
             base = self.skins.not_found
-        return _pick_scaled_key(self.canvas, self.assets, base)
+        # giống style fixture assets: nếu có _0.5/_0.75 thì tự chọn
+        return _maybe_append_scale(self.assets, self.canvas, base)
 
     # ---------------------------
     # Event handlers
