@@ -18,6 +18,7 @@ from src.gui.widgets.entry import bind_canvas_entry
 from src.gui.widgets.text_area import bind_canvas_text_area
 from src.gui.widgets.fixture_check_slot_test import bind_fixture_check_slot_test
 from src.gui.widgets.fixture_circle_status import bind_fixture_circle_com_status
+from src.gui.widgets.paint_asset import bind_canvas_asset
 from src.gui.fixture.fill_multiple_monitor import fullscreen_on_monitor, get_monitors, monitor_from_point
 
 import tkinter.font as tkfont
@@ -255,51 +256,68 @@ class AppGUI:
     def _build_gui(self, *, win: tk.Misc, canvas: tk.Canvas, sw: int, sh: int):
         # layout
         x_axis = sw // 2
-        y_top = 60
-
-        left_x = 200
-        slot_y1 = 120
-        slot_gap = 100
+        y_axis = sh // 2
 
         # --- button start ---
-        btn_start = bind_canvas_button(
+        # btn_start = bind_canvas_button(
+        #     root=win,
+        #     canvas=canvas,
+        #     assets=self.assets,
+        #     tag="btn_start",
+        #     x=x_axis,
+        #     y=y_top,
+        #     normal_status="fixture_button_confirm_normal",
+        #     hover_status="fixture_button_confirm_hover",
+        #     active_status="fixture_button_confirm_pressed",
+        #     disabled_status="fixture_button_confirm_disabled",
+        #     text="",
+        #     text_font=self.tektur_font,
+        #     command=None,           # hoặc: lambda w=win: self.on_start(w)
+        #     cooldown_ms=500,
+        # )
+
+        # --- COM status (dock origin) ---
+        com1 = bind_fixture_circle_com_status(
             root=win,
             canvas=canvas,
             assets=self.assets,
-            tag="btn_start",
-            x=x_axis,
-            y=y_top,
-            normal_status="fixture_button_confirm_normal",
-            hover_status="fixture_button_confirm_hover",
-            active_status="fixture_button_confirm_pressed",
-            disabled_status="fixture_button_confirm_disabled",
-            text="",
-            text_font=self.tektur_font,
-            command=None,           # hoặc: lambda w=win: self.on_start(w)
-            cooldown_ms=500,
+            tag="com_status",
+            x=-2, y=0,          # (x,y) là gốc DOCK theo logic bạn mới muốn
+            label="COM999",
+            status="stand_by",
         )
-
-        # --- slots ---
+        com1.set_disabled(True)
+        
+        # --- slots: row 1 ---
+        y_slot_offset = y_axis // 2 * 0.8
+        x_slot_origin = x_axis * 0.1
+        left_x = x_slot_origin
+        slot_gap = self.assets["fixture_slot_test"].width() * 0.5
         slot1 = bind_fixture_check_slot_test(
             root=win,
             canvas=canvas,
             assets=self.assets,
             tag="slot1_status",
-            x=left_x, y=slot_y1,
-            status="testing",
+            x=left_x, y=y_slot_offset,
+            status="idle",
             text="IN",
-            text_font=("Tektur", 11, "bold"),
+            text_font=("Tektur", 17, "bold"),
         )
+
+        # Calculate positions for slot2 and slot3 based on slot1 and asset width 
+        slot2_x = left_x + slot_gap
+        slot3_x = slot2_x + slot_gap
+        slot4_x = slot3_x + slot_gap
 
         slot2 = bind_fixture_check_slot_test(
             root=win,
             canvas=canvas,
             assets=self.assets,
             tag="slot2_status",
-            x=left_x, y=slot_y1 + slot_gap,
-            status="pass",
+            x=slot2_x, y=y_slot_offset,
+            status="idle",
             text="OUT",
-            text_font=("Tektur", 11, "bold"),
+            text_font=("Tektur", 17, "bold"),
         )
 
         slot3 = bind_fixture_check_slot_test(
@@ -307,186 +325,157 @@ class AppGUI:
             canvas=canvas,
             assets=self.assets,
             tag="slot3_status",
-            x=left_x, y=slot_y1 + slot_gap * 2,
-            status="fail",
+            x=slot3_x, y=y_slot_offset,
+            status="idle",
             text="FORCE\nSTOP",
             text_font=("Tektur", 11, "bold"),
         )
 
-        # --- COM status (dock origin) ---
-        com1 = bind_fixture_circle_com_status(
+        slot4 = bind_fixture_check_slot_test(
             root=win,
             canvas=canvas,
             assets=self.assets,
-            tag="com1_status",
-            x=-2, y=0,          # (x,y) là gốc DOCK theo logic bạn mới muốn
-            label="COM1",
-            status="listening",
+            tag="slot4_status",
+            x=slot4_x, y=y_slot_offset,
+            status="idle",
+            text="RESET",
+            text_font=("Tektur", 11, "bold"),
         )
-        com1.set_disabled(True)
 
+        # --- slots: row 2 ---
+        y_slot_offset += slot_gap
+        left_x = x_slot_origin
+
+        # (You can add more slots or other widgets here as needed)
+        slot5 = bind_fixture_check_slot_test(
+            root=win,
+            canvas=canvas,
+            assets=self.assets,
+            tag="slot5_status",
+            x=left_x, y=y_slot_offset,
+            status="idle",
+            text="",
+            text_font=("Tektur", 13, "bold"),
+        )
+
+        left_x += slot_gap
+        slot6 = bind_fixture_check_slot_test(
+            root=win,
+            canvas=canvas,
+            assets=self.assets,
+            tag="slot6_status",
+            x=left_x, y=y_slot_offset,
+            status="idle",
+            text="",
+            text_font=("Tektur", 13, "bold"),
+        )
+
+        left_x += slot_gap
+        slot7 = bind_fixture_check_slot_test(
+            root=win,
+            canvas=canvas,
+            assets=self.assets,
+            tag="slot7_status",
+            x=left_x, y=y_slot_offset,
+            status="idle",
+            text="",
+            text_font=("Tektur", 13, "bold"),
+        )
+
+        left_x += slot_gap
+        slot8 = bind_fixture_check_slot_test(
+            root=win,
+            canvas=canvas,
+            assets=self.assets,
+            tag="slot8_status",
+            x=left_x, y=y_slot_offset,
+            status="idle",
+            text="",
+            text_font=("Tektur", 13, "bold"),
+        )
+
+        # --- slots: row 3 ---
+        y_slot_offset += slot_gap
+        left_x = x_slot_origin
+
+        # (You can add more slots or other widgets here as needed)
+        slot9 = bind_fixture_check_slot_test(
+            root=win,
+            canvas=canvas,
+            assets=self.assets,
+            tag="slot9_status",
+            x=left_x, y=y_slot_offset,
+            status="idle",
+            text="",
+            text_font=("Tektur", 13, "bold"),
+        )
+
+        left_x += slot_gap
+        slot10 = bind_fixture_check_slot_test(
+            root=win,
+            canvas=canvas,
+            assets=self.assets,
+            tag="slot10_status",
+            x=left_x, y=y_slot_offset,
+            status="idle",
+            text="",
+            text_font=("Tektur", 13, "bold"),
+        )
+
+        left_x += slot_gap
+        slot11 = bind_fixture_check_slot_test(
+            root=win,
+            canvas=canvas,
+            assets=self.assets,
+            tag="slot11_status",
+            x=left_x, y=y_slot_offset,
+            status="idle",
+            text="",
+            text_font=("Tektur", 13, "bold"),
+        )
+
+        left_x += slot_gap
+        slot12 = bind_fixture_check_slot_test(
+            root=win,
+            canvas=canvas,
+            assets=self.assets,
+            tag="slot12_status",
+            x=left_x, y=y_slot_offset,
+            status="idle",
+            text="",
+            text_font=("Tektur", 13, "bold"),
+        )
+
+        # Paint arrow
+        left_x += slot_gap*2
+        y_slot_offset -= slot_gap
+        arrow = bind_canvas_asset(
+            root=win,
+            canvas=canvas,
+            assets=self.assets,
+            tag="arrow_indicator",
+            x=left_x, y=y_slot_offset,
+            anchor="center",
+            right_key="fixture_arrow_to_right",
+            state="normal",
+        )
         return {
-            "btn_start": btn_start,
+            # "btn_start": btn_start,
             "slot1": slot1,
             "slot2": slot2,
             "slot3": slot3,
+            "slot4": slot4,
+            "slot5": slot5,
+            "slot6": slot6,
+            "slot7": slot7,
+            "slot8": slot8,
+            "slot9": slot9,
+            "slot10": slot10,
+            "slot11": slot11,
+            "slot12": slot12,
+            "arrow": arrow,
             "com1": com1,
         }
-
-
-    # def _init_ui(self):
-    #     # : Initialize UI components here
-    #     # center and layout based on current screen size (fullscreen)
-    #     x_axis = self.screen_width // 2
-    #     y_axis = self.screen_height // 2
-    #     y_item_offset = 60
-    #     try:
-            
-    #         self.button_sample = bind_canvas_button(
-    #             root=self.root,
-    #             canvas=self._canvas,
-    #             assets=self.assets,
-    #             tag="btn_example",
-    #             x=x_axis + self.assets["button_normal"].width()//2,
-    #             y=y_item_offset,
-    #             normal_status="button_normal",
-    #             hover_status="button_hover",
-    #             active_status="button_active",
-    #             disabled_status="button_disabled",  # nếu có; không có thì dùng chung button_disabled
-    #             text="START",
-    #             text_font=self.tektur_font,
-    #             command=lambda: self.entry_1.configure(state="normal"),
-    #             cooldown_ms=500,
-    #         )
-
-    #         self.button_sample2 = bind_canvas_button(
-    #             root=self.root,
-    #             canvas=self._canvas,
-    #             assets=self.assets,
-    #             tag="btn_example2",
-    #             x=x_axis - self.assets["button_normal"].width()//2,
-    #             y=y_item_offset,
-    #             normal_status="button_normal",
-    #             hover_status="button_hover",
-    #             active_status="button_active",
-    #             disabled_status="button_disabled",  # nếu có; không có thì dùng chung button_disabled
-    #             text="CANCEL",
-    #             text_font=self.tektur_font,
-    #             command=lambda: self.entry_1.configure(state="disabled"),
-    #             cooldown_ms=500,
-    #         )
-
-    #         self.emit_msg("Init UI...")
-
-    #         self.entry_1 = bind_canvas_entry(
-    #             root=self.root,
-    #             canvas=self._canvas,
-    #             assets=self.assets,
-    #             x=x_axis,
-    #             y=y_item_offset + 90,
-    #             name="username",
-    #             field_label="Username",
-    #             placeholder="Nhập username...",
-    #             font=self.tektur_font,
-    #             on_submit=lambda s: self.emit_msg(f"submit username: {s}"),
-    #             state="normal",
-    #         )
-
-    #         self.result_var = bind_canvas_text_area(
-    #             root=self.root,
-    #             canvas=self._canvas,
-    #             assets=self.assets,
-    #             x=x_axis,
-    #             y=y_item_offset +130,
-    #             bg_key="279_result_field",
-    #             name="logs",
-    #             anchor="n",
-    #             readonly=True,
-    #             auto_scroll=True,
-    #             max_lines=500,
-    #         )
-
-    #         # append log:
-    #         self.result_var.append("~/ hello")   # nhanh
-
-    #         self._is_closing_all = False
-    #         self.root.protocol("WM_DELETE_WINDOW", lambda: self._close_all_windows(self.root))
-
-    #     except Exception as e:
-    #         self.emit_msg(f"Error initializing UI: {e}")
-    #         raise
-
-
-    # def _build_ui_on(self, *, win: tk.Misc, canvas: tk.Canvas, sw: int, sh: int):
-    #     x_axis = sw // 2
-    #     y_item_offset = 60
-
-    #     # Entry (mỗi window có entry riêng)
-    #     entry = bind_canvas_entry(
-    #         root=win,
-    #         canvas=canvas,
-    #         assets=self.assets,
-    #         x=x_axis,
-    #         y=y_item_offset + 90,
-    #         name="username",
-    #         field_label="Username",
-    #         placeholder="Nhập username...",
-    #         font=self.tektur_font,
-    #         on_submit=lambda s: self.emit_msg(f"[{win.winfo_name()}] submit username: {s}"),
-    #         state="normal",
-    #     )
-
-    #     # Buttons (command phải thao tác entry của CHÍNH window đó, không dùng self.entry_1)
-    #     btn_start = bind_canvas_button(
-    #         root=win,
-    #         canvas=canvas,
-    #         assets=self.assets,
-    #         tag="btn_example",
-    #         x=x_axis + self.assets["button_normal"].width() // 2,
-    #         y=y_item_offset,
-    #         normal_status="button_normal",
-    #         hover_status="button_hover",
-    #         active_status="button_active",
-    #         disabled_status="button_disabled",
-    #         text="START",
-    #         text_font=self.tektur_font,
-    #         command=lambda w=win: self.on_start(w),
-    #         cooldown_ms=500,
-    #     )
-
-    #     btn_cancel = bind_canvas_button(
-    #         root=win,
-    #         canvas=canvas,
-    #         assets=self.assets,
-    #         tag="btn_example2",
-    #         x=x_axis - self.assets["button_normal"].width() // 2,
-    #         y=y_item_offset,
-    #         normal_status="button_normal",
-    #         hover_status="button_hover",
-    #         active_status="button_active",
-    #         disabled_status="button_disabled",
-    #         text="CANCEL",
-    #         text_font=self.tektur_font,
-    #         command=lambda w=win: self.on_cancel(w),
-    #         cooldown_ms=500,
-    #     )
-
-    #     # Logs area
-    #     logs = bind_canvas_text_area(
-    #         root=win,
-    #         canvas=canvas,
-    #         assets=self.assets,
-    #         x=x_axis,
-    #         y=y_item_offset + 130,
-    #         bg_key="279_result_field",
-    #         name="logs",
-    #         anchor="n",
-    #         readonly=True,
-    #         auto_scroll=True,
-    #         max_lines=500,
-    #     )
-
-    #     return {"entry": entry, "btn_start": btn_start, "btn_cancel": btn_cancel, "logs": logs}
 
     def _pump_log_buffer(self):
         try:

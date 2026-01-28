@@ -410,6 +410,7 @@ def bind_fixture_check_slot_test(
             testing_status += "_0.5"
             pass_status += "_0.5"
             fail_status += "_0.5"
+
         elif canvas_width <= 1200:
             idle_status += "_0.75"
             testing_status += "_0.75"
