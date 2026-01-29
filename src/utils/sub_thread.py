@@ -14,8 +14,9 @@ import threading
 import time
 import traceback
 import inspect
+from collections import deque
+from typing import Any, Callable, Deque, Dict, Optional, Tuple
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Dict, Tuple
 
 
 ProgressCallback = Callable[[Any], None]
@@ -23,7 +24,6 @@ SuccessCallback = Callable[[Any, Dict[str, Any]], None]
 ErrorCallback = Callable[[str, Dict[str, Any]], None]
 FinallyCallback = Callable[[str, Dict[str, Any]], None]
 StartCallback = Callable[[Dict[str, Any]], None]
-
 
 @dataclass(frozen=True)
 class TaskHandle:
@@ -493,4 +493,189 @@ class SubProcessRunner:
         try:
             self.root.after(self.poll_ms, self._poll)
         except Exception:
+            return
+        
+@dataclass
+class _QueuedTask:
+    func: Callable[..., Any]
+    args: Tuple[Any, ...]
+    kwargs: Dict[str, Any]
+    name: str
+    on_start: Optional[StartCallback]
+    on_success: Optional[SuccessCallback]
+    on_error: Optional[ErrorCallback]
+    on_finally: Optional[FinallyCallback]
+    on_progress: Optional[ProgressCallback]
+
+class SequentialTaskQueue:
+    """
+    - Submit nhiều task -> xếp hàng
+    - Chỉ chạy 1 task mỗi lúc
+    - Khi task kết thúc (ok/err/cancelled) -> tự start task kế tiếp
+    """
+
+    def __init__(self, *, root, runner) -> None:
+        self.root = root
+        self.runner = runner
+
+        self._lock = threading.Lock()
+        self._q: Deque[Tuple[str, _QueuedTask]] = deque()
+        self._running_job_id: Optional[str] = None
+        self._running_handle: Any = None
+
+        self._seq = 0
+        self._queued_cancel: set[str] = set()  # cancel trước khi start
+
+    def submit(
+        self,
+        *,
+        func: Callable[..., Any],
+        args: Tuple[Any, ...] = (),
+        kwargs: Optional[Dict[str, Any]] = None,
+        name: Optional[str] = None,
+        on_start: Optional[StartCallback] = None,
+        on_success: Optional[SuccessCallback] = None,
+        on_error: Optional[ErrorCallback] = None,
+        on_finally: Optional[FinallyCallback] = None,
+        on_progress: Optional[ProgressCallback] = None,
+    ) -> str:
+        """
+        Returns: job_id (string) để bạn theo dõi/cancel.
+        """
+        if kwargs is None:
+            kwargs = {}
+
+        with self._lock:
+            self._seq += 1
+            job_id = f"job-{int(time.time()*1000)}-{self._seq}"
+            t = _QueuedTask(
+                func=func,
+                args=args,
+                kwargs=dict(kwargs),
+                name=name or getattr(func, "__name__", "task"),
+                on_start=on_start,
+                on_success=on_success,
+                on_error=on_error,
+                on_finally=on_finally,
+                on_progress=on_progress,
+            )
+            self._q.append((job_id, t))
+
+        self._kick()
+        return job_id
+
+    def cancel(self, job_id: str, *, force: bool = False) -> None:
+        """
+        - Nếu job chưa chạy: remove khỏi queue.
+        - Nếu đang chạy: gọi runner.cancel(handle).
+        """
+        with self._lock:
+            # running?
+            if self._running_job_id == job_id and self._running_handle is not None:
+                handle = self._running_handle
+            else:
+                handle = None
+                # remove from queue
+                self._queued_cancel.add(job_id)
+
+        if handle is not None:
+            # cancel running task
+            if hasattr(self.runner, "cancel"):
+                try:
+                    # SubProcessRunner.cancel(handle, force=...)
+                    self.runner.cancel(handle, force=force)  # type: ignore[arg-type]
+                except TypeError:
+                    # SubThreadRunner.cancel(handle)
+                    self.runner.cancel(handle)  # type: ignore[arg-type]
+            return
+
+        # nếu là queued-cancel, nó sẽ được skip khi start_next()
+
+    def _kick(self) -> None:
+        # đảm bảo start_next chạy trên Tk main thread
+        try:
+            self.root.after(0, self._start_next_if_idle)
+        except Exception:
+            pass
+
+    def _start_next_if_idle(self) -> None:
+        with self._lock:
+            if self._running_job_id is not None:
+                return  # đang chạy rồi
+        self._start_next()
+
+    def _start_next(self) -> None:
+        # pop 1 job, skip những job đã bị cancel trước khi start
+        while True:
+            with self._lock:
+                if not self._q:
+                    self._running_job_id = None
+                    self._running_handle = None
+                    return
+
+                job_id, task = self._q.popleft()
+
+                if job_id in self._queued_cancel:
+                    self._queued_cancel.remove(job_id)
+                    # gọi finally(cancelled) cho thống nhất (optional)
+                    if task.on_finally:
+                        try:
+                            task.on_finally("cancelled", {"task_id": job_id, "name": task.name})
+                        except Exception:
+                            pass
+                    continue
+
+                self._running_job_id = job_id
+
+            # fire on_start (SubThreadRunner của bạn hiện không fire on_start)
+            meta = {"task_id": job_id, "name": task.name}
+            if task.on_start:
+                try:
+                    task.on_start(meta)
+                except Exception:
+                    pass
+
+            # wrap callbacks để tự kéo job tiếp theo
+            def _on_success(result: Any, _meta: Dict[str, Any]) -> None:
+                if task.on_success:
+                    try:
+                        task.on_success(result, _meta)
+                    except Exception:
+                        pass
+
+            def _on_error(tb: str, _meta: Dict[str, Any]) -> None:
+                if task.on_error:
+                    try:
+                        task.on_error(tb, _meta)
+                    except Exception:
+                        pass
+
+            def _on_finally(status: str, _meta: Dict[str, Any]) -> None:
+                if task.on_finally:
+                    try:
+                        task.on_finally(status, _meta)
+                    except Exception:
+                        pass
+                # mark idle + start next
+                with self._lock:
+                    self._running_job_id = None
+                    self._running_handle = None
+                self._kick()
+
+            # NOTE:
+            # - ta pass on_start=None vào runner để tránh double-call (SubProcessRunner có on_start)
+            # - meta runner trả về có thể khác; mình dùng meta của runner luôn cho consistency
+            handle = self.runner.submit(
+                func=task.func,
+                args=task.args,
+                kwargs=task.kwargs,
+                name=task.name,
+                on_start=None,
+                on_success=_on_success,
+                on_error=_on_error,
+                on_finally=_on_finally,
+                on_progress=task.on_progress,
+            )
+            with self._lock:
+                self._running_handle = handle
             return

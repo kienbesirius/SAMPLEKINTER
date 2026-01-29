@@ -237,12 +237,10 @@ class AppGUI:
         # Init Runner 
         self.runner = sub_thread.SubProcessRunner(self.root)
 
+        self.taskq = sub_thread.SequentialTaskQueue(root=self.root, runner=self.runner)
+
         # Setting root
         self.root.title("GUI Tkinter")
-        # Open fullscreen instead of fixed-size window
-        # Use the screen dimensions so canvas/UI can adapt to full screen
-        # self.screen_width = self.root.winfo_screenwidth()
-        # self.screen_height = self.root.winfo_screenheight()
 
         self.screen_width, self.screen_height = apply_fullscreen_and_capture_size(self.root)
 
@@ -269,20 +267,6 @@ class AppGUI:
 
         self.assets = load_assets.tk_load_image_resources()
 
-        # Build GUI - Bind Events - Pump Logs
-        # self._init_ui()
-
-        # self.widgets_main = self._build_ui_on(
-        #     win=self.root,
-        #     canvas=self._canvas,
-        #     sw=self.screen_width,
-        #     sh=self.screen_height,
-        # )
-
-        # # nếu code khác vẫn cần self.entry_1/self.result_var:
-        # self.entry_1 = self.widgets_main["entry"]
-        # self.result_var = self.widgets_main["logs"]
-
         # TODO: Create UI for testing fixture
 
         self.widgets_main = self._build_gui(win=self.root,
@@ -296,8 +280,9 @@ class AppGUI:
         self.create_extra_windows()
 
         self._resolve_COM()
-        self.update_slot_status(1, "pass")
-        self.update_slot_status(2, "fail")
+
+        # reset slot status after 5s
+        self.root.after(5000, self.reset_slot_status)
     
     # TODO: Create UI for testing fixture
     def _build_gui(self, *, win: tk.Misc, canvas: tk.Canvas, sw: int, sh: int):
@@ -412,38 +397,76 @@ class AppGUI:
                     
             com1.set_disabled(True)
 
-    def update_slot_status(self, slot_id: int = 1, status: SlotStatus = "idle") -> None:
-        """
-        1) Update config file
-        2) Load lại status từ file
-        3) Set status widget
-        """
+    def reset_slot_status(self):
         def _do():
-            # validate runtime (đảm bảo không sai)
+            reset_slot_status_section_to_idle(self.cfg_path)
+            return True
+
+        def _ok(_result, _meta):
+            # sau reset thì reload UI (enqueue tiếp cũng OK, vì taskq serial)
+            self.reload_slot_status()
+
+        self.taskq.submit(
+            func=_do,
+            kwargs={},
+            name="Reset Slots",
+            on_start=self._task_start_cb,
+            on_success=_ok,
+            on_error=self._task_error_cb,
+            on_finally=self._task_finally_cb,
+            on_progress=self._task_progress_cb,
+        )
+
+    def reload_slot_status(self):
+        def _do():
+            return load_slot_status_from_ini(self.cfg_path)
+
+        def _ok(status_map, _meta):
+            self.status_map = status_map
+            for slot_id, status in self.status_map.items():
+                for w in self._iter_windows():
+                    ws = self._get_widgets(w)
+                    slot = ws.get(f"slot{slot_id}")
+                    if slot:
+                        slot.set_status(status)  # UI update: chạy trên main thread (callback)
+
+        self.taskq.submit(
+            func=_do,
+            kwargs={},
+            name="Reload Slots",
+            on_start=self._task_start_cb,
+            on_success=_ok,
+            on_error=self._task_error_cb,
+            on_finally=self._task_finally_cb,
+            on_progress=self._task_progress_cb,
+        )
+
+    def update_slot_status(self, slot_id: int = 1, status: str = "idle") -> None:
+        def _do():
             st = str(status).strip().lower()
             if st not in _ALLOWED_STATUS:
                 raise ValueError(f"Invalid status: {status!r}. Allowed: {sorted(_ALLOWED_STATUS)}")
             if not (1 <= slot_id <= 12):
                 raise ValueError(f"slot_idx out of range: {slot_id}")
 
-            # 1) update file
             update_ini_slot_status(self.cfg_path, slot_id, st)
-            # 2) load lại status
-            self.status_map = load_slot_status_from_ini(self.cfg_path)
-            # 3) set status widget
+            return load_slot_status_from_ini(self.cfg_path)
+
+        def _ok(status_map, _meta):
+            self.status_map = status_map
             new_status = self.status_map.get(slot_id, "idle")
             for w in self._iter_windows():
                 ws = self._get_widgets(w)
                 slot = ws.get(f"slot{slot_id}")
-                if slot:        
+                if slot:
                     slot.set_status(new_status)
-        # Run in process for safe (if needed)
-        self._task_hander = self.runner.submit(
+
+        self.taskq.submit(
             func=_do,
             kwargs={},
             name=f"Update slot{slot_id}",
             on_start=self._task_start_cb,
-            on_success=None,
+            on_success=_ok,
             on_error=self._task_error_cb,
             on_finally=self._task_finally_cb,
             on_progress=self._task_progress_cb,
