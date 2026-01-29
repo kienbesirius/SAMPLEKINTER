@@ -6,8 +6,9 @@ import threading
 import tkinter as tk
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Literal
 from typing import Callable, Optional, Tuple
+from src.gui.gui279_perfect_squares import count_perfect_squares
 from src.platform import dpi
 from src.gui.asset import load_assets # TẢI ASSETS vào GDI (fonts) | 
 from src.utils import sub_thread # SubProcessThread: XỬ LÝ SUB THREAD (TASKS) | Tách biệt main tkinter GUI thread với các tác vụ nền
@@ -21,8 +22,47 @@ from src.gui.widgets.fixture_circle_status import bind_fixture_circle_com_status
 from src.gui.widgets.paint_asset import bind_canvas_asset
 from src.gui.widgets.canvas_log_widget import bind_canvas_log_widget
 from src.gui.fixture.fill_multiple_monitor import fullscreen_on_monitor, get_monitors, monitor_from_point
-
+from src.gui.fixture.get_fixture_port import get_fixture_port, parse_fixture_port_text
+from src.gui.fixture.get_serial_list import get_serial_ports
+from src.utils.config_go import load_fixture_cfg, choose_slot_font, reset_slot_status_section_to_idle, update_ini_slot_status, load_slot_status_from_ini, SlotStatus, _ALLOWED_STATUS
 import tkinter.font as tkfont
+
+# CORE-1: Getting fixture port
+def obtaining_fixture_com(emit=print, cancel_event: threading.Event=None, progress_cb=None):
+    """
+    Lấy cổng COM của thiết bị fixture.
+    Trả về chuỗi tên cổng (vd: "COM3") hoặc None nếu không tìm thấy.
+    progress_cb: Callable[[str], None] - callback để báo tiến trình (nếu cần)
+    cancel_event: threading.Event - sự kiện để hủy bỏ quá trình tìm kiếm
+    """
+    try:
+        ports = get_serial_ports()
+        for port in ports:
+            if cancel_event and cancel_event.is_set():
+                emit("Obtaining COM cancelled.")
+                return "COMX"
+            if progress_cb:
+                progress_cb({"message": f"Checking {port}..."})
+            found = get_fixture_port(port)
+            parsed = parse_fixture_port_text(found)
+            if found:
+                emit("Found fixture on COM:", port)
+                if progress_cb:
+                    progress_cb({
+                        "message": f"Found: {found}...",
+                        "port": parsed.port,
+                        "baudrate": parsed.baudrate,
+                        "ending_line": parsed.line_ending    
+                    })
+                return port
+            time.sleep(0.1)  # giả lập delay kiểm tra
+
+        emit("No fixture COM found.")
+        return "COMX"
+    except Exception as e:
+        emit(f"Found exception on obtaining COM ---")
+        emit(str(e))
+        return "COMX"
 
 # Keep the window always on top (works on Windows and many Tk backends)
 def topmost_window(root):
@@ -86,6 +126,8 @@ def apply_fullscreen_and_capture_size(root: tk.Misc) -> tuple[int, int]:
     root.update_idletasks()
     root.update()
     return root.winfo_width(), root.winfo_height()
+
+LogColor = Literal["white", "red", "green", "yellow", "blue"]
 
 @dataclass
 class ScreenContext:
@@ -160,6 +202,9 @@ class AppGUI:
             
     def __init__(self, root: tk.Tk):
         # Build log buffer
+        self.cfg_path = app_dir() / "config.ini"
+        self.status_map = load_slot_status_from_ini(self.cfg_path)
+
         self.log_buffer_max_lines = 500
         self.logger, self.log_buffer = build_log_buffer(max_buffer=self.log_buffer_max_lines)
         self.emit_msg = self.logger.info
@@ -245,13 +290,14 @@ class AppGUI:
             sw=self.screen_width,
             sh=self.screen_height,)
 
-        self._binding_events()
-        self._pump_log_buffer()
-
         # Apply fullscreen on current monitor
         fullscreen_on_monitor(self.root, self.current_window)
 
         self.create_extra_windows()
+
+        self._resolve_COM()
+        self.update_slot_status(1, "pass")
+        self.update_slot_status(2, "fail")
     
     # TODO: Create UI for testing fixture
     def _build_gui(self, *, win: tk.Misc, canvas: tk.Canvas, sw: int, sh: int):
@@ -259,23 +305,7 @@ class AppGUI:
         x_axis = sw // 2
         y_axis = sh // 2
 
-        # --- button start ---
-        # btn_start = bind_canvas_button(
-        #     root=win,
-        #     canvas=canvas,
-        #     assets=self.assets,
-        #     tag="btn_start",
-        #     x=x_axis,
-        #     y=y_top,
-        #     normal_status="fixture_button_confirm_normal",
-        #     hover_status="fixture_button_confirm_hover",
-        #     active_status="fixture_button_confirm_pressed",
-        #     disabled_status="fixture_button_confirm_disabled",
-        #     text="",
-        #     text_font=self.tektur_font,
-        #     command=None,           # hoặc: lambda w=win: self.on_start(w)
-        #     cooldown_ms=500,
-        # )
+        self.fx_cfg = load_fixture_cfg(app_dir()/"config.ini")
 
         # --- COM status (dock origin) ---
         com1 = bind_fixture_circle_com_status(
@@ -284,410 +314,141 @@ class AppGUI:
             assets=self.assets,
             tag="com_status",
             x=-2, y=0,          # (x,y) là gốc DOCK theo logic bạn mới muốn
-            label="COM999",
+            label="COM1",
             status="stand_by",
         )
         com1.set_disabled(True)
         
-        # --- slots: row 1 ---
-        y_slot_offset = y_axis // 2 * 0.8
-        x_slot_origin = x_axis * 0.1
-        left_x = x_slot_origin
-        slot_gap = self.assets["fixture_slot_test"].width() * 0.5
-        slot1 = bind_fixture_check_slot_test(
-            root=win,
-            canvas=canvas,
-            assets=self.assets,
-            tag="slot1_status",
-            x=left_x, y=y_slot_offset,
-            status="idle",
-            text="IN",
-            text_font=("Tektur", 17, "bold"),
-        )
+        widgets: Dict[str, Any] = {
+            "com1": com1,
+        }
+        
+        y0 = int((y_axis // 2) * 0.8)       # row 1 y
+        x0 = int(x_axis * 0.1)              # origin x
+        slot_gap = self.assets["fixture_slot_test"].width() * 0.5  # giữ đúng như code bạn
 
-        # Calculate positions for slot2 and slot3 based on slot1 and asset width 
-        slot2_x = left_x + slot_gap
-        slot3_x = slot2_x + slot_gap
-        slot4_x = slot3_x + slot_gap
+        for i in range(1, 13):
+            row = (i - 1) // 4
+            col = (i - 1) % 4
+            x = x0 + col * slot_gap
+            y = y0 + row * slot_gap
 
-        slot2 = bind_fixture_check_slot_test(
-            root=win,
-            canvas=canvas,
-            assets=self.assets,
-            tag="slot2_status",
-            x=slot2_x, y=y_slot_offset,
-            status="idle",
-            text="OUT",
-            text_font=("Tektur", 17, "bold"),
-        )
+            text = self.fx_cfg.slot_text.get(i, "")
+            font = choose_slot_font(text)
 
-        slot3 = bind_fixture_check_slot_test(
-            root=win,
-            canvas=canvas,
-            assets=self.assets,
-            tag="slot3_status",
-            x=slot3_x, y=y_slot_offset,
-            status="idle",
-            text="FORCE\nSTOP",
-            text_font=("Tektur", 11, "bold"),
-        )
+            slot = bind_fixture_check_slot_test(
+                root=win,
+                canvas=canvas,
+                assets=self.assets,
+                tag=f"slot{i}_status",
+                x=x, y=y,
+                status=self.status_map.get(i, "idle"),
+                text=text,
+                text_font=font,
+            )
 
-        slot4 = bind_fixture_check_slot_test(
-            root=win,
-            canvas=canvas,
-            assets=self.assets,
-            tag="slot4_status",
-            x=slot4_x, y=y_slot_offset,
-            status="idle",
-            text="RESET",
-            text_font=("Tektur", 11, "bold"),
-        )
-
-        # --- slots: row 2 ---
-        y_slot_offset += slot_gap
-        left_x = x_slot_origin
-
-        # (You can add more slots or other widgets here as needed)
-        slot5 = bind_fixture_check_slot_test(
-            root=win,
-            canvas=canvas,
-            assets=self.assets,
-            tag="slot5_status",
-            x=left_x, y=y_slot_offset,
-            status="idle",
-            text="",
-            text_font=("Tektur", 13, "bold"),
-        )
-
-        left_x += slot_gap
-        slot6 = bind_fixture_check_slot_test(
-            root=win,
-            canvas=canvas,
-            assets=self.assets,
-            tag="slot6_status",
-            x=left_x, y=y_slot_offset,
-            status="idle",
-            text="",
-            text_font=("Tektur", 13, "bold"),
-        )
-
-        left_x += slot_gap
-        slot7 = bind_fixture_check_slot_test(
-            root=win,
-            canvas=canvas,
-            assets=self.assets,
-            tag="slot7_status",
-            x=left_x, y=y_slot_offset,
-            status="idle",
-            text="",
-            text_font=("Tektur", 13, "bold"),
-        )
-
-        left_x += slot_gap
-        slot8 = bind_fixture_check_slot_test(
-            root=win,
-            canvas=canvas,
-            assets=self.assets,
-            tag="slot8_status",
-            x=left_x, y=y_slot_offset,
-            status="idle",
-            text="",
-            text_font=("Tektur", 13, "bold"),
-        )
-
-        # --- slots: row 3 ---
-        y_slot_offset += slot_gap
-        left_x = x_slot_origin
-
-        # (You can add more slots or other widgets here as needed)
-        slot9 = bind_fixture_check_slot_test(
-            root=win,
-            canvas=canvas,
-            assets=self.assets,
-            tag="slot9_status",
-            x=left_x, y=y_slot_offset,
-            status="idle",
-            text="",
-            text_font=("Tektur", 13, "bold"),
-        )
-
-        left_x += slot_gap
-        slot10 = bind_fixture_check_slot_test(
-            root=win,
-            canvas=canvas,
-            assets=self.assets,
-            tag="slot10_status",
-            x=left_x, y=y_slot_offset,
-            status="idle",
-            text="",
-            text_font=("Tektur", 13, "bold"),
-        )
-
-        left_x += slot_gap
-        slot11 = bind_fixture_check_slot_test(
-            root=win,
-            canvas=canvas,
-            assets=self.assets,
-            tag="slot11_status",
-            x=left_x, y=y_slot_offset,
-            status="idle",
-            text="",
-            text_font=("Tektur", 13, "bold"),
-        )
-
-        left_x += slot_gap
-        slot12 = bind_fixture_check_slot_test(
-            root=win,
-            canvas=canvas,
-            assets=self.assets,
-            tag="slot12_status",
-            x=left_x, y=y_slot_offset,
-            status="idle",
-            text="",
-            text_font=("Tektur", 13, "bold"),
-        )
+            widgets[f"slot{i}"] = slot
 
         # Paint arrow
-        left_x += slot_gap*2
-        y_slot_offset -= slot_gap
+        x += slot_gap*2
+        y -= slot_gap
         arrow = bind_canvas_asset(
             root=win,
             canvas=canvas,
             assets=self.assets,
             tag="arrow_indicator",
-            x=left_x, y=y_slot_offset,
+            x=x, y=y,
             anchor="center",
             right_key="fixture_arrow_to_right",
             state="normal",
         )
 
+        widgets[f"arrow"] = arrow
 
-        left_x += slot_gap*1.5 + self.assets["fixture_info_frame_bg"].width() / 2
-        self.logs = logs = bind_canvas_log_widget(
+        x += slot_gap*1.5 + self.assets["fixture_info_frame_bg"].width() / 2
+        logs = bind_canvas_log_widget(
             root=win,
             canvas=canvas,
             assets=self.assets,
             tag="logs_panel",
-            x=left_x, y=y_slot_offset,
+            x=x, y=y,
             bg_key="fixture_info_frame_bg",
             anchor="center",
             ui_max_lines=100,
             buf_max_lines=500,
         )
 
-        # bơm log (có thể gọi spam, hoặc từ thread khác)
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        self.logs.emit("Device connected", "white")
-        self.logs.emit("ERROR: timeout", "red")
-        self.logs.emit("Warning: low signal", "yellow")
-        self.logs.emit("RX OK", "blue")
-        self.logs.emit("Bế Chí Kiên", "green")
-        return {
-            # "btn_start": btn_start,
-            "slot1": slot1,
-            "slot2": slot2,
-            "slot3": slot3,
-            "slot4": slot4,
-            "slot5": slot5,
-            "slot6": slot6,
-            "slot7": slot7,
-            "slot8": slot8,
-            "slot9": slot9,
-            "slot10": slot10,
-            "slot11": slot11,
-            "slot12": slot12,
-            "arrow": arrow,
-            "logs": logs,
-            "com1": com1,
-        }
+        widgets["logs"] = logs
 
-    def _pump_log_buffer(self):
-        try:
-            with self._log_lock:
-                if self.log_buffer:
-                    for msg in self.log_buffer:
-                        getattr(self.emit_msg, "print", print)(msg)
-                    self.log_buffer.clear()
-        except Exception as e:
-            pass
-        finally:
-            try:
-                if self.root.winfo_exists() and not getattr(self, "_is_closing_all", False):
-                    self.root.after(100, self._pump_log_buffer)
-            except tk.TclError:
-                pass
-
-    def _binding_events(self):
-        # TODO: Bind events here
-        try:
-            self.emit_msg("Binding events...")
-        except Exception as e:
-            pass
+        return widgets
     
+    # Resolve COM port
+    def _resolve_COM(self):
+        # Get COM port and update UI through runner
+        self._task_hander = self.runner.submit(
+            func=obtaining_fixture_com,
+            kwargs={"emit": self._update_logs_panel},
+            name="Obtain fixture COM",
+            on_start=self._task_start_cb,
+            on_success=lambda result, meta: self._resolve_COM_task_finished(result, meta),
+            on_error=self._task_error_cb,
+            on_finally=self._task_finally_cb,
+            on_progress=self._task_progress_cb,
+        )
+
+    # Resolve COM port
+    def _resolve_COM_task_finished(self, result: str, meta: dict):
+        self._update_logs_panel(f"COM: {result}", "green")
+        # Update UI accordingly
+        for w in self._iter_windows():
+            ws = self._get_widgets(w)
+            com1 = ws.get("com1")
+            if com1:
+                com1.set_label(result)
+                if result == "COMX":
+                    com1.set_status("not_found")
+                else: 
+                    com1.set_status("listening")
+                    
+            com1.set_disabled(True)
+
+    def update_slot_status(self, slot_id: int = 1, status: SlotStatus = "idle") -> None:
+        """
+        1) Update config file
+        2) Load lại status từ file
+        3) Set status widget
+        """
+        def _do():
+            # validate runtime (đảm bảo không sai)
+            st = str(status).strip().lower()
+            if st not in _ALLOWED_STATUS:
+                raise ValueError(f"Invalid status: {status!r}. Allowed: {sorted(_ALLOWED_STATUS)}")
+            if not (1 <= slot_id <= 12):
+                raise ValueError(f"slot_idx out of range: {slot_id}")
+
+            # 1) update file
+            update_ini_slot_status(self.cfg_path, slot_id, st)
+            # 2) load lại status
+            self.status_map = load_slot_status_from_ini(self.cfg_path)
+            # 3) set status widget
+            new_status = self.status_map.get(slot_id, "idle")
+            for w in self._iter_windows():
+                ws = self._get_widgets(w)
+                slot = ws.get(f"slot{slot_id}")
+                if slot:        
+                    slot.set_status(new_status)
+        # Run in process for safe (if needed)
+        self._task_hander = self.runner.submit(
+            func=_do,
+            kwargs={},
+            name=f"Update slot{slot_id}",
+            on_start=self._task_start_cb,
+            on_success=None,
+            on_error=self._task_error_cb,
+            on_finally=self._task_finally_cb,
+            on_progress=self._task_progress_cb,
+        )
+
     # Broadcasting event 
     def _get_widgets(self, win: tk.Misc) -> dict:
         if win is self.root:
@@ -704,38 +465,52 @@ class AppGUI:
             except Exception:
                 pass
 
-    def _apply_start(self, win: tk.Misc):
-        # TODO: Need to modify
-        ws = self._get_widgets(win)
-        entry = ws.get("entry")
-        if entry:
-            entry.configure(state="normal")
+    ### Pump log buffer to UI through emit_msg to the log.info
+    def _update_logs_panel(self, msg: str, color: LogColor = "white"):
+        self.emit_msg(msg)
 
-    def _apply_cancel(self, win: tk.Misc):
-        # TODO: Need to modify
-        ws = self._get_widgets(win)
-        entry = ws.get("entry")
-        if entry:
-            entry.configure(state="disabled")
+        with self._log_lock:
+            # get last line
+            line = self.log_buffer[-1:]
+        if line:
+            # iter window and update log
+            for w in self._iter_windows():
+                ws = self._get_widgets(w)
+                logs = ws.get("logs")
+                if logs:
+                    logs.emit(line[0], color)  # màu trắng mặc định
 
-    def on_start(self, source_win: tk.Misc):
-        # TODO: Need to modify
-        # 1) xử lý window hiện tại
-        self._apply_start(source_win)
-        # 2) broadcast sang các window khác
-        for w in self._iter_windows():
-            if w is source_win:
-                continue
-            self._apply_start(w)
+    ### Runner Callback
+    def _task_start_cb(self, meta):
+        name = meta["name"]
+        self._update_logs_panel(f"{name}...", "yellow")
 
-    def on_cancel(self, source_win: tk.Misc):
-        # TODO: Need to modify
-        self._apply_cancel(source_win)
-        for w in self._iter_windows():
-            if w is source_win:
-                continue
-            self._apply_cancel(w)
+    def _task_progress_cb(self, payload):
+        message = payload["message"]
+        port = payload["port"]
+        baudrate = payload["baudrate"]
+        ending_line = payload["ending_line"]
+        # message = getattr(payload, "message", str(payload))
+        self._update_logs_panel(f"{message}")
+        self._update_logs_panel(f"port: {port}")
+        self._update_logs_panel(f"baudrate: {baudrate}")
+        self._update_logs_panel(f"ending_line: {ending_line}")
 
+    def _task_error_cb(self, payload, meta):
+        self._update_logs_panel(f"Error: {payload}", color="red")
+        self._update_logs_panel(f"FAILED: {meta}", color="red")
+
+    def _task_finally_cb(self, status:str, meta:dict):
+        self._running = False
+        self._task_handler = None
+        if status == "cancelled":
+            self._update_logs_panel("Cancelled by the user.")
+        
+        name = meta["name"]
+        if status.lower() == "ok":
+            self._update_logs_panel(f"{name} ~ END", "yellow")
+
+    # Close all windows
     def _close_all_windows(self, source_win: tk.Misc | None = None):
         # chống re-entrant (vì destroy root sẽ destroy các toplevel, callback có thể bị gọi chồng)
         if getattr(self, "_is_closing_all", False):
@@ -743,10 +518,10 @@ class AppGUI:
         self._is_closing_all = True
 
         # (optional) cleanup runner/process nếu bạn có stop/terminate
-        # try:
-        #     self.runner.stop_all()
-        # except Exception:
-        #     pass
+        try:
+            self.runner.stop_all()
+        except Exception:
+            pass
 
         # destroy tất cả cửa sổ con trước (optional)
         for w in list(self.roots_extra):
@@ -763,3 +538,4 @@ class AppGUI:
                 self.root.destroy()
         except Exception:
             pass
+

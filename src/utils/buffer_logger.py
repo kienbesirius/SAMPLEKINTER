@@ -6,7 +6,7 @@ import threading
 from typing import List, Tuple
 #  _fmt = "•
 # _fmt = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
-_fmt = "~/ %(asctime)s | %(message)s"
+_fmt = "~/[%(asctime)s] %(message)s"
 _datefmt = "%m-%d %H:%M:%S"
 
 logbuf_fmt = fmt = logging.Formatter(fmt=_fmt, datefmt=_datefmt)

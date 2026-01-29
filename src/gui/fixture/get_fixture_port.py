@@ -1,11 +1,17 @@
 from __future__ import annotations
-
 import re
 import time
-from dataclasses import dataclass
-from typing import Iterable, List, Optional, Sequence, Tuple
+from dataclasses import dataclass, field
+from typing import List, Optional, Sequence, Tuple, Union
 
 import serial  # pip install pyserial
+
+# dùng tail-read từ send_command.py
+try:
+    from .send_command import _read_with_tail  # type: ignore
+except Exception:
+    # fallback for running from project root
+    from src.gui.fixture.send_command import _read_with_tail  # type: ignore
 
 
 # --- Heuristic keywords (không bắt buộc phải đủ hết, chỉ dùng để chấm điểm) ---
@@ -17,14 +23,33 @@ _STRONG_KEYWORDS = {
     "INPUT", "CHECK", "SET", "SN", "READSN",
 }
 
-# Các cụm “đánh dấu help” hay gặp
+# Các cụm “đánh dấu help” hay gặp (bắt cả typo trong log)
 _HELP_MARKERS = (
-    "CONTROL CAMMAND",          # typo in logs but appears
-    "CONTROL COMMAND",          
+    "CONTROL CAMMAND",
+    "CONTROL COMMAND",
     "THIS IS THE HELP COMMAND",
     "SHOW ALL THE COMMANDS",
     "GET CAMMAND INFO",
     "GET COMMAND INFO",
+    "SHOW_COMMAND",
+    "?(SHOW ALL THE COMMANDS)",
+)
+
+# Token command “một dòng 1 lệnh” thường gặp của fixture
+_FIXTURE_TOKENS = {
+    "?", "HELP", "SHOW_COMMAND",
+    "OPEN", "CLOSE", "IN", "OUT", "UP", "DOWN",
+    "EMPTY_IN", "EMPTY", "PRODUCT", "STATE", "VERSION",
+    "POWER_ON", "POWER_OFF", "PWR_ON", "PWR_OFF",
+    "USB_IN", "USB_OUT", "RJ45_IN", "RJ45_OUT",
+    "READSN", "SN", "RESET",
+}
+
+# Các dòng info/boot thường thấy (không phải command list)
+_INFO_PREFIX = (
+    "MCU FLASH SIZE", "APP MAX SIZE", "APP_ADDR",
+    "BJ_F1_BOOTLOADER", "BOOTLOADER", "DATE:",
+    "INITIAL OK", "MOTOR_", "SET VOLUME",
 )
 
 # Regex để nhận dòng command-like
@@ -36,40 +61,65 @@ _RE_TIMESTAMP_PREFIX = re.compile(r"^\s*\[\d{2}:\d{2}:\d{2}:\d{3}\]\s*")
 @dataclass
 class ProbeResult:
     port: str
-    is_fixture: bool
-    score: int
-    command_lines: int
-    matched_keywords: List[str]
-    sample: str  # một đoạn response để debug
+    baudrate: int = 0
+    line_ending: str = ""  # raw ending string: "\r\n", "\n", "\r", ""
+    is_fixture: bool = False
+    score: int = 0
+    command_lines: int = 0
+    matched_keywords: List[str] = field(default_factory=list)
+    sample: str = ""
+
+
+def _ending_name(le: str) -> str:
+    return {
+        "\r\n": "CRLF",
+        "\n": "LF",
+        "\r": "CR",
+        "": "NONE",
+    }.get(le, repr(le))
+
+
+def _normalize_ports(ports: Union[str, Sequence[str]]) -> List[str]:
+    # Nếu ai đó truyền "/dev/ttyUSB3" (string) thì wrap lại thành list 1 phần tử
+    if isinstance(ports, str):
+        return [ports]
+    return list(ports)
 
 
 def _normalize_lines(raw: str) -> List[str]:
+    # Chuẩn hoá về \n để split
     raw = raw.replace("\r", "\n")
-    lines = []
+    lines: List[str] = []
     for ln in raw.split("\n"):
         ln = ln.strip()
         if not ln:
             continue
+        # strip timestamp dạng [08:31:32:400]
         ln = _RE_TIMESTAMP_PREFIX.sub("", ln).strip()
-        lines.append(ln)
+        if ln:
+            lines.append(ln)
     return lines
 
 
 def _is_command_like(line: str) -> bool:
-    # Bỏ qua các noise cực ngắn kiểu "OK", "NG", "STOP!" vẫn có thể xuất hiện
-    # nhưng không dùng để tính command-lines trừ khi nó giống command.
+    up = line.upper()
+
+    # Loại các line info/boot phổ biến để tránh chấm nhầm
+    if any(up.startswith(p) for p in _INFO_PREFIX):
+        return False
+
     if _RE_COLON_CMD.match(line):
         return True
 
-    # cho phép "power on", "uarten off" dạng 2 từ
+    # Cho phép "power on" dạng 2 từ / token đơn
     if _RE_SIMPLE_CMD.match(line):
         # loại bớt các token không giúp ích
-        if line.upper() in {"OK", "NG"}:
+        if up in {"OK", "NG", "<BREAK>"}:
             return False
         return True
 
     # Một số fixture có dòng kiểu "CMD=StartAll|PanelSN=1"
-    if line.upper().startswith("CMD="):
+    if up.startswith("CMD="):
         return True
 
     return False
@@ -77,7 +127,7 @@ def _is_command_like(line: str) -> bool:
 
 def _extract_keywords(lines: List[str]) -> List[str]:
     text = " ".join(lines).upper()
-    matched = []
+    matched: List[str] = []
     for kw in _STRONG_KEYWORDS:
         # match theo word boundary “gần đúng”
         if re.search(rf"(^|[^A-Z0-9_]){re.escape(kw)}([^A-Z0-9_]|$)", text):
@@ -89,64 +139,94 @@ def _extract_keywords(lines: List[str]) -> List[str]:
 def _is_fixture_response(lines: List[str]) -> Tuple[bool, int, int, List[str]]:
     """
     Return: (is_fixture, score, command_lines_count, matched_keywords)
+
+    Heuristic bám sát pattern của fixture:
+    - Có help marker + có list command
+    - Hoặc nhiều dòng colon-def (OPEN:..., SET_...:...)
+    - Hoặc list token command (SHOW_COMMAND/OPEN/CLOSE/IN/OUT/UP/DOWN/...)
     """
     if not lines:
         return (False, 0, 0, [])
 
     text_up = " ".join(lines).upper()
 
-    # Marker help rõ ràng
     has_help_marker = any(m in text_up for m in _HELP_MARKERS)
 
-    command_lines = [ln for ln in lines if _is_command_like(ln)]
-    cmd_count = len(command_lines)
-
-    # Keyword score
     matched = _extract_keywords(lines)
-    score = len(matched)
+    kw_score = len(matched)
 
-    # “Dạng colon cmd” hay gặp ở fixture (OPEN:..., SET_...:...)
     colon_defs = sum(1 for ln in lines if _RE_COLON_CMD.match(ln))
+    cmd_like = [ln for ln in lines if _is_command_like(ln)]
+    cmd_count = len(cmd_like)
 
-    # Heuristic quyết định:
-    # - có help marker -> gần như chắc fixture nếu có thêm chút command-lines
-    if has_help_marker and cmd_count >= 4:
+    token_lines = 0
+    for ln in lines:
+        tok = ln.strip().upper()
+        if tok in _FIXTURE_TOKENS:
+            token_lines += 1
+
+    # score tổng hợp: marker + colon defs mạnh hơn keyword
+    score = kw_score + (2 * colon_defs) + token_lines + (6 if has_help_marker else 0)
+
+    # 1) Có marker help + có dấu hiệu list command rõ ràng
+    if has_help_marker and (colon_defs >= 3 or token_lines >= 6 or cmd_count >= 8):
         return (True, score, cmd_count, matched)
 
-    # - nhiều colon defs là cực mạnh
-    if colon_defs >= 5 and score >= 3:
+    # 2) Dạng colon list mạnh
+    if colon_defs >= 6:
         return (True, score, cmd_count, matched)
 
-    # - dạng list command thuần: cần đủ “lượng” + đủ keywords
-    #   (tránh nhầm thiết bị nào đó chỉ trả vài token)
-    if (cmd_count >= 10 and score >= 3) or (cmd_count >= 6 and score >= 5):
+    # 3) Dạng token list (Windows style)
+    if token_lines >= 8 and kw_score >= 2:
+        return (True, score, cmd_count, matched)
+
+    # 4) Có CMD=... (fixture protocol style)
+    if any(ln.upper().startswith("CMD=") for ln in lines) and (token_lines >= 4 or kw_score >= 2):
         return (True, score, cmd_count, matched)
 
     return (False, score, cmd_count, matched)
 
 
-def _read_for(ser: serial.Serial, duration_s: float) -> str:
+def _write_all_noflush(ser: serial.Serial, data: bytes) -> None:
     """
-    Read whatever comes within duration_s (non-blocking-ish).
+    Gửi hết bytes nhưng KHÔNG gọi ser.flush() (tránh tcdrain gây kẹt / write timeout).
+    Payload probe thường ngắn, nhưng vẫn xử lý partial write.
     """
-    end = time.monotonic() + duration_s
-    chunks: List[bytes] = []
-    while time.monotonic() < end:
+    mv = memoryview(data)
+    total = 0
+    while total < len(mv):
         try:
-            n = ser.in_waiting
-        except Exception:
+            n = ser.write(mv[total:])
+        except serial.SerialTimeoutException:
             n = 0
+        if not n:
+            time.sleep(0.002)
+            continue
+        total += n
 
-        if n:
-            chunks.append(ser.read(n))
-        else:
-            # ngủ nhỏ để không busy loop
-            time.sleep(0.03)
 
-    try:
-        return b"".join(chunks).decode("utf-8", errors="ignore")
-    except Exception:
-        return ""
+def _send_and_wait_text(
+    ser: serial.Serial,
+    payload: bytes,
+    *,
+    read_timeout: float,
+    tail_timeout: float = 2.0,
+) -> str:
+    """
+    - Gửi payload
+    - Đọc response theo cơ chế is_ready_to_break + tail window (dùng _read_with_tail)
+    """
+    _write_all_noflush(ser, payload)
+
+    raw = _read_with_tail(
+        ser,
+        first_byte_timeout=read_timeout,
+        tail_timeout=tail_timeout,
+        log_cb=None,
+        break_predicate=None,  # probe help -> đừng break theo keyword
+        max_after_first_data=12.0,
+    )
+    return raw.decode("utf-8", errors="ignore")
 
 
 def _probe_one_port(
@@ -156,57 +236,78 @@ def _probe_one_port(
     per_cmd_wait_s: float,
     write_line_endings: Sequence[str],
 ) -> ProbeResult:
-    best = ProbeResult(port=port, is_fixture=False, score=0, command_lines=0, matched_keywords=[], sample="")
+    best = ProbeResult(port=port)
 
     for br in baudrates:
         try:
             ser = serial.Serial(
                 port=port,
                 baudrate=br,
-                timeout=0.2,
-                write_timeout=0.6,
+                timeout=0,          # non-blocking read
+                write_timeout=1.0,  # probe cmd ngắn
             )
         except Exception:
             continue
 
         try:
-            # settle
-            time.sleep(0.15)
+            # Nhiều board reset khi open port -> đợi + xả boot log
+            time.sleep(0.6)
             try:
                 ser.reset_input_buffer()
                 ser.reset_output_buffer()
             except Exception:
                 pass
 
+            # Drain rác nhanh (nếu board tự bắn log khi mới mở)
+            _ = _read_with_tail(
+                ser,
+                first_byte_timeout=0.2,
+                tail_timeout=0.2,
+                log_cb=None,
+                break_predicate=None,
+                max_after_first_data=0.5,
+            )
+
             for cmd in probe_cmds:
                 for le in write_line_endings:
-                    # clear before each attempt
                     try:
                         ser.reset_input_buffer()
                     except Exception:
                         pass
 
                     payload = (cmd + le).encode("utf-8", errors="ignore")
+
                     try:
-                        ser.write(payload)
-                        ser.flush()
+                        raw = _send_and_wait_text(
+                            ser,
+                            payload,
+                            read_timeout=per_cmd_wait_s,
+                            tail_timeout=2.0,
+                        )
                     except Exception:
                         continue
 
-                    raw = _read_for(ser, per_cmd_wait_s)
                     lines = _normalize_lines(raw)
-
                     is_fix, score, cmd_count, matched = _is_fixture_response(lines)
 
-                    # lưu best để debug
-                    if score > best.score or (score == best.score and cmd_count > best.command_lines):
+                    # ---- chọn best: ưu tiên fixture True trước ----
+                    better = False
+                    if is_fix and not best.is_fixture:
+                        better = True
+                    elif is_fix == best.is_fixture:
+                        if score > best.score or (score == best.score and cmd_count > best.command_lines):
+                            better = True
+
+                    if better:
                         best = ProbeResult(
                             port=port,
+                            baudrate=br,
+                            line_ending=le,
                             is_fixture=is_fix,
                             score=score,
                             command_lines=cmd_count,
                             matched_keywords=matched,
-                            sample="\n".join(lines[:60]),  # đủ để nhìn pattern
+                            sample="\n".join(lines[:60]),
                         )
 
                     if is_fix:
@@ -222,7 +323,7 @@ def _probe_one_port(
 
 
 def get_fixture_port(
-    ports: Sequence[str],
+    ports: Union[str, Sequence[str]],
     probe_cmds: Optional[Sequence[str]] = None,
     *,
     baudrates: Sequence[int] = (115200, 9600, 57600, 38400, 19200),
@@ -231,12 +332,12 @@ def get_fixture_port(
     return_debug: bool = False,
 ) -> Optional[str] | Tuple[Optional[str], List[ProbeResult]]:
     """
-    - ports: list port bạn muốn scan (COMx hoặc /dev/ttyUSBx)
-    - probe_cmds: list lệnh để thử (mặc định theo bạn mô tả)
+    - ports: list port bạn muốn scan (COMx hoặc /dev/ttyUSBx) hoặc 1 string "/dev/ttyUSB3"
+    - probe_cmds: list lệnh để thử
     - baudrates: thử nhiều baud để tránh “im lặng” vì sai baud
-    - per_cmd_wait_s: mỗi lệnh chờ đọc response (vd 3s)
-    - prefer_first: list port ưu tiên thử trước (vd ["COM1"])
-    - return_debug: True -> trả thêm danh sách ProbeResult để xem vì sao fail/pass
+    - per_cmd_wait_s: mỗi lệnh chờ đọc response
+    - prefer_first: list port ưu tiên thử trước
+    - return_debug: True -> trả thêm danh sách ProbeResult
     """
     if probe_cmds is None:
         probe_cmds = ["?", "help", "HELP", "Help", "SHOW_COMMAND"]
@@ -244,8 +345,7 @@ def get_fixture_port(
     # line endings hay gặp (nhiều fixture cần CRLF, nhưng có cái chỉ LF)
     line_endings = ["\r\n", "\n", "\r", ""]
 
-    # sắp xếp ưu tiên
-    ordered = list(ports)
+    ordered = _normalize_ports(ports)
     if prefer_first:
         pref = [p for p in prefer_first if p in ordered]
         rest = [p for p in ordered if p not in set(pref)]
@@ -261,7 +361,68 @@ def get_fixture_port(
             write_line_endings=line_endings,
         )
         results.append(r)
+
         if r.is_fixture:
-            return (r.port, results) if return_debug else r.port
+            found = f"{r.port}@{r.baudrate}@{_ending_name(r.line_ending)}"
+            return (found, results) if return_debug else found
 
     return (None, results) if return_debug else None
+
+
+_ENDING_TO_LE = {
+    "CRLF": "\r\n",
+    "LF": "\n",
+    "CR": "\r",
+    "NONE": "",
+}
+
+_LE_TO_ENDING = {v: k for k, v in _ENDING_TO_LE.items()}
+
+@dataclass(frozen=True)
+class ParsedFixturePort:
+    port: str
+    baudrate: int
+    line_ending: str  # actual bytes string: "\r\n" | "\n" | "\r" | ""
+
+
+def parse_fixture_port_text(s: str) -> ParsedFixturePort:
+    """
+    Parse: "<port>@<baudrate>@<MODE>"
+    Example:
+      "/dev/ttyUSB3@9600@CRLF" -> ("/dev/ttyUSB3", 9600, "\\r\\n")
+      "COM7@115200@LF"         -> ("COM7", 115200, "\\n")
+
+    Raises ValueError if invalid.
+    """
+    if not s or "@" not in s:
+        raise ValueError(f"Invalid fixture port text: {s!r}")
+
+    parts = s.rsplit("@", 2)  # from right, so port may contain '@' in rare cases
+    if len(parts) != 3:
+        raise ValueError(f"Invalid fixture port text: {s!r}")
+
+    port, baud_s, mode = parts[0].strip(), parts[1].strip(), parts[2].strip().upper()
+
+    if not port:
+        raise ValueError(f"Missing port in {s!r}")
+
+    try:
+        baudrate = int(baud_s)
+    except ValueError as e:
+        raise ValueError(f"Invalid baudrate {baud_s!r} in {s!r}") from e
+
+    if mode not in _ENDING_TO_LE:
+        raise ValueError(f"Invalid line ending mode {mode!r} in {s!r}. "
+                         f"Allowed: {sorted(_ENDING_TO_LE)}")
+
+    return ParsedFixturePort(port=port, baudrate=baudrate, line_ending=_ENDING_TO_LE[mode])
+
+
+def format_fixture_port_text(port: str, baudrate: int, line_ending: str) -> str:
+    """
+    Build: "<port>@<baudrate>@<MODE>" from (port, baudrate, line_ending).
+    """
+    mode = _LE_TO_ENDING.get(line_ending)
+    if mode is None:
+        raise ValueError(f"Unsupported line_ending: {line_ending!r} (expected one of {list(_LE_TO_ENDING)})")
+    return f"{port}@{int(baudrate)}@{mode}"

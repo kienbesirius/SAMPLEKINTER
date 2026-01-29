@@ -354,6 +354,15 @@ class FixtureComStatus:
             self.canvas.itemconfig(self.label_text_id, fill=self.label_fill)
 
     def set_label(self, label: str):
+
+        # Base on label len, update the font size to fit
+
+        if len(label) > 8: 
+            self.label_font = ("Tektur", 8, "bold")
+            self.canvas.itemconfig(self.label_text_id, font=self.label_font)
+        else: 
+            self.label_font = ("Tektur", 18, "bold")
+            self.canvas.itemconfig(self.label_text_id, font=self.label_font)
         self._label = (label or "").strip()
 
         # Try image label first
