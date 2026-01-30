@@ -598,6 +598,10 @@ class SequentialTaskQueue:
         except Exception:
             pass
 
+    def is_busy(self) -> bool:
+        with self._lock:
+            return self._running_job_id is not None or bool(self._q)
+        
     def _start_next_if_idle(self) -> None:
         with self._lock:
             if self._running_job_id is not None:

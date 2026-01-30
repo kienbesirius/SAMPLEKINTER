@@ -15,19 +15,30 @@ ENDING_MAP = {
     "NONE": "",
 }
 
+_ALLOWED_ENDING = {"CRLF", "LF", "CR", "NONE"}
+_FIX_KV_RE = re.compile(r"^(\s*)(port|baudrate|ending_line|timeout)(\s*=\s*)(.*?)(\s*)$", re.IGNORECASE)
+
+
+def _norm_ending(v: str, default: str = "CRLF") -> str:
+    v = (v or "").strip().upper()
+    return v if v in _ALLOWED_ENDING else default
+
 @dataclass(frozen=True)
 class FixtureConfig:
+    port: str
     baudrate: int
     ending_line: str      # actual chars: "\r\n" | "\n" | "\r" | ""
     timeout: float
     slot_text: Dict[int, str]
-    slot_status: Dict[int, str]
+    slot_status: Dict[int, str] 
 
 def load_fixture_cfg(path: str) -> FixtureConfig:
     # strict=False để không crash nếu config có key trùng (slot8 bị lặp)
     cfg = configparser.ConfigParser(strict=False)
     cfg.read(path, encoding="utf-8")
 
+
+    port = cfg.get("FIXTURE", "port", fallback="").strip()
     baudrate = cfg.getint("FIXTURE", "baudrate", fallback=9600)
     ending_mode = cfg.get("FIXTURE", "ending_line", fallback="CRLF").strip().upper()
     ending_line = ENDING_MAP.get(ending_mode, "\r\n")
@@ -40,12 +51,69 @@ def load_fixture_cfg(path: str) -> FixtureConfig:
         slot_status[i] = cfg.get("SLOT_STATUS", f"slot{i}", fallback="idle").strip()
 
     return FixtureConfig(
+        port=port,
         baudrate=baudrate,
         ending_line=ending_line,
         timeout=timeout,
         slot_text=slot_text,
         slot_status=slot_status,
     )
+
+def update_ini_fixture_section(
+    ini_path: Union[str, Path],
+    *,
+    port: Optional[str] = None,
+    baudrate: Optional[int] = None,
+    ending_line: Optional[str] = None,   # "CRLF"|"LF"|"CR"|"NONE"
+    timeout: Optional[float] = None,
+    section_name: str = "FIXTURE",
+    encoding: str = "utf-8",
+) -> None:
+    path = Path(ini_path)
+    raw = path.read_bytes() if path.exists() else b""
+    newline = "\r\n" if b"\r\n" in raw else "\n"
+    lines = (raw.decode(encoding, errors="replace").splitlines() if raw else [])
+
+    start, end = _find_section_bounds(lines, section_name)
+    if start is None:
+        if lines and lines[-1].strip() != "":
+            lines.append("")
+        lines.append(f"[{section_name}]")
+        start = len(lines)
+        end = len(lines)
+    if end is None:
+        end = len(lines)
+
+    want = {}
+    if port is not None: want["port"] = (port or "").strip()
+    if baudrate is not None: want["baudrate"] = str(int(baudrate))
+    if ending_line is not None: want["ending_line"] = _norm_ending(ending_line)
+    if timeout is not None: want["timeout"] = str(float(timeout))
+
+    seen = {k: False for k in want.keys()}
+    new_sec: list[str] = []
+    for ln in lines[start:end]:
+        m = _FIX_KV_RE.match(ln)
+        if m:
+            indent, key, eq, _old, trail = m.groups()
+            k = key.lower()
+            if k in want:
+                new_sec.append(f"{indent}{key}{eq}{want[k]}{trail}")
+                seen[k] = True
+                continue
+        new_sec.append(ln)
+
+    # append missing keys
+    missing = [k for k, ok in seen.items() if not ok]
+    if missing:
+        if new_sec and new_sec[-1].strip() != "":
+            new_sec.append("")
+        for k in missing:
+            new_sec.append(f"{k}={want[k]}")
+
+    out_lines = lines[:start] + new_sec + lines[end:]
+    out_text = newline.join(out_lines) + newline
+    _atomic_write_text(path, out_text, encoding=encoding)
 
 def choose_slot_font(label: str) -> Tuple[str, int, str]:
     label = (label or "").strip()

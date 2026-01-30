@@ -24,8 +24,10 @@ from src.gui.widgets.canvas_log_widget import bind_canvas_log_widget
 from src.gui.fixture.fill_multiple_monitor import fullscreen_on_monitor, get_monitors, monitor_from_point
 from src.gui.fixture.get_fixture_port import get_fixture_port, parse_fixture_port_text
 from src.gui.fixture.get_serial_list import get_serial_ports
-from src.utils.config_go import load_fixture_cfg, choose_slot_font, reset_slot_status_section_to_idle, update_ini_slot_status, load_slot_status_from_ini, SlotStatus, _ALLOWED_STATUS
+from src.utils.config_go import load_fixture_cfg, choose_slot_font, reset_slot_status_section_to_idle, update_ini_slot_status, load_slot_status_from_ini, SlotStatus, _ALLOWED_STATUS,update_ini_fixture_section
+from src.gui.widgets.dialog import ModalOverlay
 import tkinter.font as tkfont
+
 
 # CORE-1: Getting fixture port
 def obtaining_fixture_com(emit=print, cancel_event: threading.Event=None, progress_cb=None):
@@ -35,7 +37,57 @@ def obtaining_fixture_com(emit=print, cancel_event: threading.Event=None, progre
     progress_cb: Callable[[str], None] - callback để báo tiến trình (nếu cần)
     cancel_event: threading.Event - sự kiện để hủy bỏ quá trình tìm kiếm
     """
+    cfg_path = Path(app_dir()) / "config.ini"
+    fx = load_fixture_cfg(cfg_path)
+
     try:
+        def _progress(msg: str, *, port: str = "", baudrate: int = 0, ending_line: str = ""):
+            if progress_cb:
+                progress_cb({
+                    "message": msg,
+                    "port": port,
+                    "baudrate": baudrate,
+                    "ending_line": ending_line,
+                })
+        
+        # 1) ưu tiên cache trong config
+        if fx.port and fx.port.upper() != "COMX":
+            _progress(f"Checking cached fixture port: {fx.port} ...",
+                      port=fx.port, baudrate=fx.baudrate, ending_line=fx.ending_line)
+
+            try:
+                r = get_fixture_port(
+                    fx.port,
+                    baudrates=[fx.baudrate],
+                )
+                r = parse_fixture_port_text(r)
+                if r:
+                    emit("Found fixture from config:", fx.port)
+                    # (optional) refresh cache theo kết quả thực tế nếu bạn đã mở rộng ProbeResult
+                    try:
+                        update_ini_fixture_section(
+                            cfg_path,
+                            port=r.port,
+                            baudrate=getattr(r.baudrate, "baudrate", fx.baudrate),
+                            ending_line=getattr(r.line_ending, "ending_line", fx.ending_line),
+                            timeout=fx.timeout,
+                        )
+                    except Exception:
+                        pass
+
+                    _progress("Found fixture (cached).",
+                            port=r.port,
+                            baudrate=getattr(r, "baudrate", fx.baudrate),
+                            ending_line=getattr(r, "ending_line", fx.ending_line))
+                    return r.port
+            except Exception as e:
+                emit(f"Error checking cached port {fx.port}: {e}")
+                r = None
+                
+                _progress(f"Cached port not fixture, fallback scanning...", port=fx.port,
+                        baudrate=fx.baudrate, ending_line=fx.ending_line)
+                
+
         ports = get_serial_ports()
         for port in ports:
             if cancel_event and cancel_event.is_set():
@@ -54,6 +106,20 @@ def obtaining_fixture_com(emit=print, cancel_event: threading.Event=None, progre
                         "baudrate": parsed.baudrate,
                         "ending_line": parsed.line_ending    
                     })
+
+                # 3) ghi cache vào config để lần sau nhanh
+                update_ini_fixture_section(
+                    cfg_path,
+                    port=port,
+                    baudrate=getattr(r, "baudrate", parsed.baudrate),
+                    ending_line=getattr(r, "ending_line", parsed.line_ending),
+                    timeout=fx.timeout,
+                )
+
+                _progress("Found fixture (scanned).",
+                          port=port,
+                          baudrate=getattr(r, "baudrate", parsed.baudrate),
+                          ending_line=getattr(r, "ending_line", parsed.line_ending))
                 return port
             time.sleep(0.1)  # giả lập delay kiểm tra
 
@@ -212,7 +278,7 @@ class AppGUI:
 
         # Task management
         self._task_handler = None
-        self._is_task_running = False
+        self._running = False
 
         self.root = root
         self.background_color = "#652200"
@@ -281,14 +347,14 @@ class AppGUI:
 
         self._resolve_COM()
 
-
-
-        self.update_slot_status(slot_id=1, status="testing")
-        self.update_slot_status(slot_id=6, status="testing")
-        self.update_slot_status(slot_id=7, status="pass")
-        self.update_slot_status(slot_id=12, status="fail")
-        # reset slot status after 5s
-        self.root.after(5000, self.reset_slot_status)
+        self._refresh_gui()
+        ### Example usage of slot status update
+        # self.update_slot_status(slot_id=1, status="testing")
+        # self.update_slot_status(slot_id=6, status="testing")
+        # self.update_slot_status(slot_id=7, status="pass")
+        # self.update_slot_status(slot_id=12, status="fail")
+        # # reset slot status after 5s
+        # self.root.after(5000, self.reset_slot_status)
     
     # TODO: Create UI for testing fixture
     def _build_gui(self, *, win: tk.Misc, canvas: tk.Canvas, sw: int, sh: int):
@@ -373,6 +439,29 @@ class AppGUI:
 
         return widgets
     
+    def _refresh_gui(self):
+        # nếu queue bận, bỏ qua lần này (3s sau thử lại)
+        if not self.taskq.is_busy():
+            self.reload_slot_status()
+
+        self.root.after(3000, self._refresh_gui)
+
+    ### This is more accurate refresh GUI version with task queue
+    # def _refresh_gui(self):
+    #     try:
+    #         status_map = load_slot_status_from_ini(self.cfg_path)
+    #         self.status_map = status_map
+    #         for slot_id, status in status_map.items():
+    #             for w in self._iter_windows():
+    #                 ws = self._get_widgets(w)
+    #                 slot = ws.get(f"slot{slot_id}")
+    #                 if slot:
+    #                     slot.set_status(status)
+    #     except Exception as e:
+    #         self.emit_log(f"[refresh] error: {e}", "yellow")
+
+    #     self.root.after(3000, self._refresh_gui)
+
     # Resolve COM port
     def _resolve_COM(self):
         # Get COM port and update UI through runner
@@ -512,6 +601,9 @@ class AppGUI:
     ### Runner Callback
     def _task_start_cb(self, meta):
         name = meta["name"]
+
+        if "RELOAD" in name.upper():
+            return None
         self._update_logs_panel(f"{name}...", "yellow")
 
     def _task_progress_cb(self, payload):
@@ -536,6 +628,10 @@ class AppGUI:
             self._update_logs_panel("Cancelled by the user.")
         
         name = meta["name"]
+
+        if "RELOAD" in name.upper():
+            return None
+        
         if status.lower() == "ok":
             self._update_logs_panel(f"{name} ~ END", "yellow")
 
