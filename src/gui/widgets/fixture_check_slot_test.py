@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, Optional, Tuple, Literal
 
 
 Command = Optional[Callable[[], None]]
-SlotStatus = Literal["idle", "testing", "pass", "fail"]
+SlotStatus = Literal["idle", "testing", "pass", "fail", "stand_by", "item", "unknown"]
 
 
 @dataclass
@@ -21,6 +21,9 @@ class SlotTestSkins:
     testing: str = "fixture_slot_test_testing"
     passed: str = "fixture_slot_test_pass"
     failed: str = "fixture_slot_test_fail"
+    stand_by: str = "fixture_slot_test_item"
+    item: str = "fixture_slot_test_item"
+    unknown: str = "fixture_slot_test_idle"
 
 
 def _pick_scaled_key(canvas: tk.Canvas, assets: Dict[str, Any], base_key: str) -> str:
@@ -193,7 +196,7 @@ class FixtureCheckSlotTest:
 
     def set_status(self, status: SlotStatus):
         # tolerant: nếu status lạ thì fallback idle
-        if status not in ("idle", "testing", "pass", "fail"):
+        if status not in ("idle", "testing", "pass", "fail", "stand_by", "item", "unknown"):
             status = "idle"  # type: ignore[assignment]
         self._status = status
 
@@ -277,6 +280,12 @@ class FixtureCheckSlotTest:
             base = self.skins.passed
         elif status == "fail":
             base = self.skins.failed
+        elif status == "stand_by":
+            base = self.skins.stand_by
+        elif status == "item":
+            base = self.skins.item
+        elif status == "unknown":
+            base = self.skins.unknown
         else:
             base = self.skins.idle
 
@@ -352,6 +361,9 @@ def bind_fixture_check_slot_test(
     testing_status: str = "fixture_slot_test_testing",
     pass_status: str = "fixture_slot_test_pass",
     fail_status: str = "fixture_slot_test_fail",
+    stand_by_status: str = "fixture_slot_test_item",
+    item_status: str = "fixture_slot_test_item",
+    unknown_status: str = "fixture_slot_test_idle",
     status: SlotStatus = "idle",
     text: str = "",
     text_font: Optional[Any] = None,
@@ -409,13 +421,19 @@ def bind_fixture_check_slot_test(
             idle_status += "_0.5"
             testing_status += "_0.5"
             pass_status += "_0.5"
-            fail_status += "_0.5"
+            fail_status += "_0.5" 
+            stand_by_status += "_0.5" # "item"
+            item_status += "_0.5" # "item"
+            unknown_status += "_0.5" # "idle"
 
         elif canvas_width <= 1200:
             idle_status += "_0.75"
             testing_status += "_0.75"
             pass_status += "_0.75"
             fail_status += "_0.75"
+            stand_by_status += "_0.75" # "item"
+            item_status += "_0.75" # "item"
+            unknown_status += "_0.75" # "idle"
 
     # Build skins
     skins = SlotTestSkins(
@@ -423,6 +441,9 @@ def bind_fixture_check_slot_test(
         testing=testing_status,
         passed=pass_status,
         failed=fail_status,
+        stand_by=stand_by_status,
+        item=item_status,
+        unknown=unknown_status,
     )
     return FixtureCheckSlotTest(
         root=root,

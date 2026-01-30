@@ -72,18 +72,21 @@ ASSET_FILES = {
     "fixture_dock_check": RESOURCE_PATH / "fixture" / "DOCK_CHECK.png",
     
     "fixture_slot_test_0.5": RESOURCE_PATH / "fixture" / "slot_test_0_5.png",
+    "fixture_slot_test_item_0.5": RESOURCE_PATH / "fixture" / "slot_test_item_0_5.png",
     "fixture_slot_test_idle_0.5": RESOURCE_PATH / "fixture" / "slot_test_0_5.png",
     "fixture_slot_test_fail_0.5": RESOURCE_PATH / "fixture" / "slot_test_fail_0_5.png",
     "fixture_slot_test_pass_0.5": RESOURCE_PATH / "fixture" / "slot_test_pass_0_5.png",
     "fixture_slot_test_testing_0.5": RESOURCE_PATH / "fixture" / "slot_test_stand_by_0_5.png",
 
     "fixture_slot_test_0.75": RESOURCE_PATH / "fixture" / "slot_test_0_75.png",
+    "fixture_slot_test_item_0.75": RESOURCE_PATH / "fixture" / "slot_test_item_0_75.png",
     "fixture_slot_test_idle_0.75": RESOURCE_PATH / "fixture" / "slot_test_0_75.png",
     "fixture_slot_test_fail_0.75": RESOURCE_PATH / "fixture" / "slot_test_fail_0_75.png",
     "fixture_slot_test_pass_0.75": RESOURCE_PATH / "fixture" / "slot_test_pass_0_75.png",
     "fixture_slot_test_testing_0.75": RESOURCE_PATH / "fixture" / "slot_test_stand_by_0_75.png",
 
     "fixture_slot_test": RESOURCE_PATH / "fixture" / "slot_test.png",
+    "fixture_slot_test_item": RESOURCE_PATH / "fixture" / "slot_test_item.png",
     "fixture_slot_test_idle": RESOURCE_PATH / "fixture" / "slot_test.png",
     "fixture_slot_test_fail": RESOURCE_PATH / "fixture" / "slot_test_fail.png",
     "fixture_slot_test_pass": RESOURCE_PATH / "fixture" / "slot_test_pass.png",

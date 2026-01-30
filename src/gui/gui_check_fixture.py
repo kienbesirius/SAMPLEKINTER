@@ -281,6 +281,12 @@ class AppGUI:
 
         self._resolve_COM()
 
+
+
+        self.update_slot_status(slot_id=1, status="testing")
+        self.update_slot_status(slot_id=6, status="testing")
+        self.update_slot_status(slot_id=7, status="pass")
+        self.update_slot_status(slot_id=12, status="fail")
         # reset slot status after 5s
         self.root.after(5000, self.reset_slot_status)
     
