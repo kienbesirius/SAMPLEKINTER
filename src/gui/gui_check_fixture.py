@@ -414,6 +414,7 @@ class AppGUI:
                 status=self.status_map.get(i, "idle"),
                 text=text,
                 text_font=font,
+                command=lambda idx=i, w=win: self.show_manual_config_command(win=w, slot_idx=idx),
             )
 
             widgets[f"slot{i}"] = slot
@@ -448,24 +449,358 @@ class AppGUI:
         )
         widgets["logs"] = logs
 
-        # Bind button
-        send_test_cmd_btn = bind_canvas_button(
-            root=win,
-            canvas=canvas,
-            assets=self.assets,
-            normal_status="fixture_button_confirm_normal",
-            hover_status="fixture_button_confirm_hover",
-            active_status="fixture_button_confirm_pressed",
-            disabled_status="fixture_button_confirm_disabled",
-            tag="send_test_cmd_button",
-            x=x+400, y=y,
-            text="",
-            command=lambda: self.send_to_com("?"),
-        )
+        # # Bind button
+        # send_test_cmd_btn = bind_canvas_button(
+        #     root=win,
+        #     canvas=canvas,
+        #     assets=self.assets,
+        #     normal_status="fixture_button_confirm_normal",
+        #     hover_status="fixture_button_confirm_hover",
+        #     active_status="fixture_button_confirm_pressed",
+        #     disabled_status="fixture_button_confirm_disabled",
+        #     tag="send_test_cmd_button",
+        #     x=x+400, y=y,
+        #     text="",
+        #     command=lambda w=win: self.show_reset_confirm(w),
+        # )
+        # widgets["send_test_cmd_button"] = send_test_cmd_btn
+        #### BUTTON CHECK OKAY!!!
+        
+        # Dialog must be always last to create 
+        modal = ModalOverlay(win)
+        widgets["modal"] = modal
 
-        widgets["send_test_cmd_button"] = send_test_cmd_btn
         return widgets
     
+
+    def show_reset_confirm(self, win: tk.Misc | None = None):
+        win = win or self.root
+        modal = self._get_modal(win)
+        if not modal:
+            return
+
+        modal.clear_dialog()
+
+        # build nội dung dialog (đặt trong modal.dialog là 1 Frame)
+        box = tk.Frame(modal.dialog, bg="#222222")
+        box.pack(padx=24, pady=18)
+
+        tk.Label(
+            box, text="Reset toàn bộ 12 slot về idle?",
+            fg="white", bg="#222222",
+            font=("Tektur", 14, "bold"),
+        ).pack(pady=(0, 12))
+
+        row = tk.Frame(box, bg="#222222")
+        row.pack()
+
+        def _cancel():
+            modal.hide()
+
+        def _ok():
+            modal.hide()
+            self.reset_slot_status()   # gọi task reset của bạn
+
+        tk.Button(row, text="Cancel", command=_cancel, width=10).pack(side="left", padx=8)
+        tk.Button(row, text="OK", command=_ok, width=10).pack(side="left", padx=8)
+
+        modal.show(dim_level=0.45)
+
+    def show_manual_config_command(self, *, win: tk.Misc | None = None, slot_idx: int = 1):
+        from pathlib import Path
+        import tkinter as tk
+
+        # dùng đúng widget có sẵn
+        from src.gui.widgets.entry import bind_canvas_entry
+        from src.gui.widgets.button import bind_canvas_button
+
+        win = win or self.root
+        modal = self._get_modal(win)
+        if not modal:
+            return
+
+        self.fx_cfg = load_fixture_cfg(app_dir()/"config.ini")
+
+        # -------- helpers: read last-wins slot value in ini (chịu được key trùng như slot8) --------
+        def _ini_get_slot_value(section: str, idx: int, default: str = "") -> str:
+            try:
+                path = Path(self.cfg_path)
+                if not path.exists():
+                    return default
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+
+                in_sec = False
+                last = None
+                sec_u = section.strip().upper()
+
+                for ln in lines:
+                    s = ln.strip()
+                    if not s or s.startswith(("#", ";")):
+                        continue
+                    if s.startswith("[") and s.endswith("]"):
+                        in_sec = (s[1:-1].strip().upper() == sec_u)
+                        continue
+                    if not in_sec:
+                        continue
+
+                    if s.lower().startswith(f"slot{idx}".lower()):
+                        parts = s.split("=", 1)
+                        if len(parts) == 2:
+                            last = parts[1].strip()
+                return last if last is not None else default
+            except Exception:
+                return default
+
+        slot_test = self.fx_cfg.slot_text.get(slot_idx, "")
+        slot_cmd0 = self.fx_cfg.slot_command.get(slot_idx, "")
+
+        modal.clear_dialog()
+
+        # -------- dialog canvas (nằm trong modal.dialog Frame) --------
+        dialog_bg_key = (
+            "fixture_info_frame_bg_480"
+            if "fixture_info_frame_bg_480" in self.assets
+            else ("fixture_info_frame_bg" if "fixture_info_frame_bg" in self.assets else "")
+        )
+        bg_img = self.assets.get(dialog_bg_key)
+        W = int(bg_img.width()) if bg_img else 720
+        H = int(bg_img.height()) if bg_img else 420
+
+        cv = tk.Canvas(
+            modal.dialog,
+            width=W,
+            height=H,
+            highlightthickness=0,
+            bd=0,
+            bg="#222222",
+        )
+        cv.pack(padx=0, pady=0)
+
+        # cực quan trọng: để bind_canvas_button() lấy đúng winfo_width() khi auto scale fixture_* keys
+        try:
+            modal.dialog.update_idletasks()
+            cv.update_idletasks()
+        except Exception:
+            pass
+
+        # background image (nếu có)
+        if bg_img:
+            bg_id = cv.create_image(W // 2, H // 2, image=bg_img)
+            cv.tag_lower(bg_id)
+        else:
+            cv.create_rectangle(0, 0, W, H, fill="#222222", outline="")
+
+        # -------- title + labels --------
+        title_font = ("Tektur", 16, "bold")
+        label_font = ("Tektur", 12, "bold")
+        value_font = ("Tektur", 12)
+
+        cv.create_text(W // 2, 38, text="MANUAL SLOT COMMAND",
+                    font=title_font, fill="white", anchor="center")
+
+        xL  = 48
+        y1  = 95
+        gap = 26
+
+        # helper pick skins
+        def _pick_entry_key(*keys: str, fallback: str) -> str:
+            for k in keys:
+                if k in self.assets:
+                    return k
+            return fallback
+
+        normal_k = _pick_entry_key("entry_wide_3_normal", "entry_wide_2_normal", "entry_normal", fallback="entry_normal")
+        focus_k  = _pick_entry_key("entry_wide_3_focused", "entry_wide_2_focused", "entry_focused", fallback="entry_focused")
+        dis_k    = _pick_entry_key("entry_wide_3_disabled", "entry_wide_2_disabled", "entry_disabled", fallback="entry_disabled")
+
+        # lấy chiều cao entry để spacing “ăn khớp” asset (nếu có)
+        entry_img = self.assets.get(normal_k)
+        entry_h   = int(entry_img.height()) if entry_img else 44
+
+        # ===== ROWS (map lại toạ độ) =====
+        y_num_line      = y1
+        y_test_line     = y1 + gap                   # giữ nguyên dòng vàng SLOT TEST
+        y_cmd_label     = y_test_line + gap
+
+        btn_y = H - 52
+        btn_gap = 160
+        cx = W // 2
+
+        entry_img = self.assets.get(normal_k)
+        entry_img_h = int(entry_img.height()) if entry_img else 64
+        y_cmd_entry  = btn_y - (entry_img_h // 2) - 22
+        y_test_entry = y_cmd_entry - entry_img_h - 14
+
+        entry_x = W // 2
+        value_x = xL + 170
+
+        # --- SLOT NUMBER line (giữ nguyên) ---
+        cv.create_text(xL, y_num_line, text="SLOT NUMBER:", font=label_font, fill="white", anchor="w")
+        cv.create_text(value_x, y_num_line, text=str(slot_idx), font=value_font, fill="#FFE37A", anchor="w")
+
+        # --- SLOT TEST display line (GIỮ nguyên text vàng cho chuyên nghiệp) ---
+        cv.create_text(xL, y_test_line, text="SLOT TEST:", font=label_font, fill="white", anchor="w")
+        cv.create_text(value_x, y_test_line, text=(slot_test or "(empty)"), font=value_font, fill="#FFE37A", anchor="w")
+
+        # --- SLOT COMMAND label + entry (đẩy xuống dưới) ---
+        cv.create_text(xL, y_cmd_label, text="SLOT COMMAND:", font=label_font, fill="white", anchor="w")
+        cv.create_text(value_x, y_cmd_label, text=(slot_cmd0 or "(empty)"), font=value_font, fill="#FFE37A", anchor="w")
+
+        # --- SLOT TEST edit entry (nằm dưới, không đụng dòng vàng) ---
+        txt_entry = bind_canvas_entry(
+            root=modal.dialog,
+            canvas=cv,
+            assets=self.assets,
+            x=entry_x,
+            y=y_test_entry,
+            name=f"slot_test_{slot_idx}",          # ✅ đổi name, tránh trùng
+            field_label="Cập nhật slot test",
+            field_label_fill="white",
+            placeholder="Nhập SLOT_TEST...",
+            font=getattr(self, "tektur_font", None),
+            auto_skin_by_label=False,
+            normal=normal_k,
+            focus=focus_k,
+            disabled_status=dis_k,
+            state="normal",
+        )
+        txt_entry.set(slot_test or "")
+
+        cmd_entry = bind_canvas_entry(
+            root=modal.dialog,
+            canvas=cv,
+            assets=self.assets,
+            x=entry_x,
+            y=y_cmd_entry,
+            name=f"slot_cmd_{slot_idx}",
+            field_label="Cập nhật slot cmd",
+            field_label_fill="white",
+            placeholder="Nhập SLOT_COMMAND...",
+            font=getattr(self, "tektur_font", None),
+            auto_skin_by_label=False,
+            normal=normal_k,
+            focus=focus_k,
+            disabled_status=dis_k,
+            state="normal",
+        )
+        cmd_entry.set(slot_cmd0 or "")
+
+        # -------- buttons (dùng bind_canvas_button) --------
+
+        # pick button skins an toàn (fallback về default keys)
+        def _pick_btn_key(*keys: str, fallback: str) -> str:
+            for k in keys:
+                if k in self.assets:
+                    return k
+            return fallback
+
+        def _set_btn_visible(btn, visible: bool):
+            # CanvasButton có img_id/text_id public :contentReference[oaicite:3]{index=3}
+            st = "normal" if visible else "hidden"
+            try:
+                cv.itemconfig(btn.img_id, state=st)
+            except Exception:
+                pass
+            try:
+                cv.itemconfig(btn.text_id, state=st)
+            except Exception:
+                pass
+
+        def _move_btn(btn, x: int, y: int):
+            try:
+                cv.coords(btn.img_id, x, y)
+                cv.coords(btn.text_id, x, y)
+            except Exception:
+                pass
+
+        def _cancel():
+            modal.hide()
+
+        def _confirm():
+            new_cmd = (cmd_entry.get() or "").strip()
+            modal.hide()
+
+            # TODO: save ini sau - giờ log để verify GUI
+            try:
+                self._update_logs_panel(
+                    f"[manual] slot{slot_idx} SLOT_COMMAND = '{new_cmd}' (TODO: save to ini)",
+                    "yellow",
+                )
+            except Exception:
+                print(f"[manual] slot{slot_idx} SLOT_COMMAND = '{new_cmd}' (TODO: save to ini)")
+
+        # Confirm: mặc định ẩn, chỉ hiện khi dirty
+        btn_confirm = bind_canvas_button(
+            root=modal.dialog,
+            canvas=cv,
+            assets=self.assets,
+            tag=f"dlg_cmd_confirm_{slot_idx}",
+            x=cx - btn_gap // 2,
+            y=btn_y,
+            normal_status=_pick_btn_key("fixture_button_confirm_normal", "button_normal", fallback="button_normal"),
+            hover_status=_pick_btn_key("fixture_button_confirm_hover", "button_hover", fallback="button_hover"),
+            active_status=_pick_btn_key("fixture_button_confirm_pressed", "fixture_button_confirm_active", "button_active", fallback="button_active"),
+            disabled_status=_pick_btn_key("fixture_button_confirm_disabled", "button_disabled", fallback="button_disabled"),
+            text="",
+            text_font=getattr(self, "tektur_font", None),
+            command=_confirm,
+            cooldown_ms=900,
+        )
+        _set_btn_visible(btn_confirm, False)
+
+        # Cancel: luôn hiện
+        btn_cancel = bind_canvas_button(
+            root=modal.dialog,
+            canvas=cv,
+            assets=self.assets,
+            tag=f"dlg_cmd_cancel_{slot_idx}",
+            x=cx,                       # khi chưa dirty -> cancel ở giữa
+            y=btn_y,
+            normal_status=_pick_btn_key("fixture_button_cancel_normal", "button_normal", fallback="button_normal"),
+            hover_status=_pick_btn_key("fixture_button_cancel_hover", "button_hover", fallback="button_hover"),
+            active_status=_pick_btn_key("fixture_button_cancel_pressed", "fixture_button_cancel_active", "button_active", fallback="button_active"),
+            disabled_status=_pick_btn_key("fixture_button_cancel_disabled", "button_disabled", fallback="button_disabled"),
+            text="",
+            text_font=getattr(self, "tektur_font", None),
+            command=_cancel,
+            cooldown_ms=900,
+        )
+
+        # Enter = confirm nếu dirty
+        def _on_submit(_text: str):
+            if (cmd_entry.get() or "") != (slot_cmd0 or ""):
+                _confirm()
+
+        cmd_entry.configure(on_submit=_on_submit)
+
+        def _apply_dirty():
+            dirty = ((cmd_entry.get() or "") != (slot_cmd0 or ""))
+            _set_btn_visible(btn_confirm, dirty)
+            if dirty:
+                _move_btn(btn_cancel, cx + btn_gap // 2, btn_y)
+            else:
+                _move_btn(btn_cancel, cx, btn_y)
+
+        # trace thay đổi entry để show/hide confirm
+        try:
+            cmd_entry.var.trace_add("write", lambda *_: _apply_dirty())
+            txt_entry.var.trace_add("write", lambda *_: _apply_dirty())
+        except Exception:
+            pass
+        _apply_dirty()
+
+        # Show modal + focus entry
+        modal.show(dim_level=0.45)   # giống show_reset_confirm :contentReference[oaicite:4]{index=4}
+        try:
+            win.after(50, cmd_entry.focus_set)
+        except Exception:
+            pass
+
+
+    def _get_modal(self, win: tk.Misc) -> "ModalOverlay | None":
+        ws = self._get_widgets(win)
+        return ws.get("modal")
+
     def _refresh_gui(self):
         # nếu queue bận, bỏ qua lần này (3s sau thử lại)
         if not self.taskq.is_busy():
@@ -503,39 +838,66 @@ class AppGUI:
             on_progress=self._task_progress_cb,
         )
 
-    # Resolve COM port
-    def _resolve_COM_task_finished(self, result: str, meta: dict):
-        self._update_logs_panel(f"COM: {result}", "green")
-        # Update UI accordingly
+    def _resolve_COM_task_finished(self, result: str, _meta):
+        # 1) update label cho tất cả window trước
         for w in self._iter_windows():
             ws = self._get_widgets(w)
             com1 = ws.get("com1")
             if com1:
                 com1.set_label(result)
-                if result == "COMX":
+
+        # 2) stop instance cũ (nếu có)
+        if getattr(self, "listenport", None):
+            try:
+                self.listenport.stop()
+            except Exception:
+                pass
+            self.listenport = None
+
+        # 3) nếu không có COM thì update status rồi return
+        if result == "COMX":
+            for w in self._iter_windows():
+                ws = self._get_widgets(w)
+                com1 = ws.get("com1")
+                if com1:
                     com1.set_status("not_found")
-                else:
-                    try:
-                        dispatch = lambda fn: self.root.after(0, fn)
-                        self.listenport = ListenPort(
-                            port=self.port,
-                            baudrate=self.baudrate,
-                            log=self.emit_msg,                 # optional
-                            on_rx=lambda s: self._update_logs_panel(f"RX: {s}", "white"),
-                            dispatch=dispatch,
-                        )
-                        self.listenport.start()
-                        com1.set_status("listening")
-                    except Exception as e:
-                        self._update_logs_panel(f"Error starting ListenPort: {e}", "red")
-                        com1.set_status("error")
-            com1.set_disabled(True)
+                    com1.set_disabled(True)
+            return
+
+        # 4) start ListenPort 1 lần
+        try:
+            dispatch = lambda fn: self.root.after(0, fn)
+            self.listenport = ListenPort(
+                port=result,                 # dùng result, đừng dùng self.port mơ hồ
+                baudrate=self.baudrate,
+                log=self.emit_msg,
+                on_rx=lambda s: self._update_logs_panel(f"RX: {s}", "white"),
+                dispatch=dispatch,
+            )
+            self.listenport.start()
+            status = "listening"
+        except Exception as e:
+            self._update_logs_panel(f"Error starting ListenPort: {e}", "red")
+            status = "error"
+
+        # 5) apply status cho tất cả window
+        for w in self._iter_windows():
+            ws = self._get_widgets(w)
+            com1 = ws.get("com1")
+            if com1:
+                com1.set_status(status)
+                com1.set_disabled(True)
 
     def send_to_com(self, cmd: str):
         def _do():
             if not self.listenport:
                 raise RuntimeError("ListenPort not initialized")
-            ok, lines = self.listenport.send_and_collect(cmd=cmd, append_crlf=True)
+            dispatch = lambda fn: self.root.after(0, fn)
+            ok, lines = self.listenport.send_and_collect(
+                cmd=cmd,
+                append_crlf=True, 
+                on_line=lambda s: dispatch(lambda: self._update_logs_panel(f"RX: {s}", "yellow"))
+            )
             return ok, lines
 
         def _ok(result, _meta):

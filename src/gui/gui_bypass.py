@@ -82,3 +82,22 @@ class AppGUI:
         self._btn_disabled = {}
 
         self.assets = load_assets.tk_load_image_resources()
+
+        from src.gui.widgets.entry import bind_canvas_entry
+
+        x_axis = W // 2
+        y_axis = H // 2
+
+        self.user_entry = bind_canvas_entry(
+            root=self.root,
+            canvas=self._canvas,
+            assets=self.assets,
+            x=x_axis,
+            y=y_axis,
+            name="username",
+            field_label="Scan DSN:",
+            placeholder="Sảo mã DSN...",
+            font=self.tektur_font,
+            on_submit=lambda s: self.emit_msg(f"submit username: {s}"),
+            state="normal",
+        )

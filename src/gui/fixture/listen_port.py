@@ -228,7 +228,7 @@ class ListenPort:
         append_crlf: bool = True,
         clear_before_send: bool = True,
         on_line: Optional[Callable[[str], None]] = None,  # <-- emit realtime (per-command)
-    ) -> Tuple[bool, str, List[str]]:
+    ) -> Tuple[bool, List[str]]:
         """
         Gom response theo từng command (dựa trên seq0), không phụ thuộc last_rx_time global.
 
@@ -236,9 +236,8 @@ class ListenPort:
         - on_line: được gọi mỗi khi có line mới thuộc command (chạy ở thread đang gọi send_and_collect)
                  => nếu update Tk, nhớ dùng root.after(...)
         Return:
-          (ok, best, lines)
+          (ok, lines)
             ok: nếu có expect -> ok = matched; nếu không expect -> ok = (có nhận được ít nhất 1 line)
-            best: line tốt nhất (ưu tiên match expect / PASS/FAIL/ERROR)
             lines: toàn bộ line thuộc command
         """
         self._ensure_ready()

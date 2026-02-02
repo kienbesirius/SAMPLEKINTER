@@ -73,8 +73,16 @@ class ModalOverlay:
             self.overlay.coords(self._rect_id, 0, 0, w, h)
             self.overlay.itemconfig(self._rect_id, fill=dim_color, stipple=stipple)
 
-        self.overlay.lift()
-        self.dialog.lift()
+        if self._rect_id is not None:
+            self.overlay.tag_lower(self._rect_id)
+
+        self.overlay.tag_lower(self._rect_id)
+
+        # ✅ raise WIDGET canvas overlay lên trên các widget khác
+        self.overlay.tk.call("raise", self.overlay._w)
+
+        # ✅ raise dialog (canvas window item) lên trên rect
+        self.overlay.tag_raise(self._dialog_win_id)
 
     def show(self, *, dim_level: float = 0.45):
         if self._shown:

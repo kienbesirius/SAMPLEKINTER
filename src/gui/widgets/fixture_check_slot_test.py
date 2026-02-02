@@ -4,11 +4,141 @@ from __future__ import annotations
 import time
 import tkinter as tk
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Tuple, Literal
-
+from typing import Any, Callable, Dict, Optional, Tuple, Literal, List
+import math
 
 Command = Optional[Callable[[], None]]
 SlotStatus = Literal["idle", "testing", "pass", "fail", "stand_by", "item", "unknown"]
+
+
+# --- ADD (đặt trước class FixtureCheckSlotTest) ---
+class _UpgradeHoverFX:
+    """
+    Hiệu ứng hover kiểu "upgrade": 2 vòng sáng + 6 sparkle.
+    Không cần asset, chạy bằng canvas shapes.
+    """
+    def __init__(
+        self,
+        *,
+        root: tk.Misc,
+        canvas: tk.Canvas,
+        tag: str,
+        base_id: int,          # img_id của slot
+        text_id: int,          # text_id để đưa lên top
+        fps_ms: int = 60,
+        extra_pad: int = 3,
+    ) -> None:
+        self.root = root
+        self.canvas = canvas
+        self.tag = tag
+        self.fx_tag = f"{tag}__hoverfx"
+        self.base_id = base_id
+        self.text_id = text_id
+        self.fps_ms = int(fps_ms)
+        self.extra_pad = int(extra_pad)
+
+        self._after: Optional[str] = None
+        self._running = False
+        self._phase = 0
+
+        self._ring1: Optional[int] = None
+        self._ring2: Optional[int] = None
+        self._sparkles: List[int] = []
+
+    def start(self) -> None:
+        if self._running:
+            return
+        self._running = True
+        self._phase = 0
+
+        # bbox đúng theo kích thước ảnh slot (asset)
+        bbox = self.canvas.bbox(self.base_id)
+        if bbox:
+            x1, y1, x2, y2 = bbox
+        else:
+            cx, cy = self.canvas.coords(self.base_id) or (0, 0)
+            x1, y1, x2, y2 = cx - 20, cy - 20, cx + 20, cy + 20
+
+        # refine bbox: actually the image may have transparent padding 8 pixels
+        x1 += 8
+        y1 += 8
+        x2 -= 10
+        y2 -= 10
+
+        # pad để viền nằm “đúng viền” hoặc nhô ra/thu vào
+        # pad > 0: viền ra ngoài asset; pad < 0: viền ăn vào trong asset
+        pad_inner = self.extra_pad - 3  # vòng trong
+        if pad_inner < 1:
+            pad_inner = 0
+        # INNER RECT
+        self._ring2 = self.canvas.create_rectangle(
+            x1 - pad_inner, y1 - pad_inner, x2 + pad_inner, y2 + pad_inner,
+            outline="#FFF2B0", width=1,
+            tags=(self.fx_tag,),
+            state="disabled",
+        )
+
+        # đảm bảo: fx nằm trên ảnh, text nằm trên fx
+        try:
+            self.canvas.tag_raise(self.fx_tag, self.base_id)
+            self.canvas.tag_raise(self.text_id, self.fx_tag)
+        except Exception:
+            pass
+
+        self._tick()
+
+    def stop(self) -> None:
+        self._running = False
+        if self._after:
+            try:
+                self.root.after_cancel(self._after)
+            except Exception:
+                pass
+            self._after = None
+
+        try:
+            self.canvas.delete(self.fx_tag)  # xoá toàn bộ item hoverfx
+        except Exception:
+            pass
+
+        self._ring1 = None
+        self._ring2 = None
+        self._sparkles.clear()
+    
+    def _tick(self) -> None:
+        if not self._running:
+            return
+
+        self._phase += 1
+
+        bbox = self.canvas.bbox(self.base_id)
+        if bbox:
+            x1, y1, x2, y2 = bbox
+        else:
+            cx, cy = self.canvas.coords(self.base_id) or (0, 0)
+            x1, y1, x2, y2 = cx - 20, cy - 20, cx + 20, cy + 20
+
+        # refine bbox: actually the image may have transparent padding 8 pixels
+        x1 += 8
+        y1 += 8
+        x2 -= 10
+        y2 -= 10
+
+        # pulse nhẹ
+        pulse = 3 * math.sin(self._phase * 0.35)
+        pad_inner = max(1.0, (self.extra_pad - 3) + pulse * 0.6)
+
+        # màu nhấp nháy
+        if (self._phase // 4) % 2 == 0:
+            c1, c2, c3 = "#FFD24A", "#FFF2B0", "#FFFFFF"
+        else:
+            c1, c2, c3 = "#FFF2B0", "#FFD24A", "#FFE37A"
+        if self._ring2:
+            self.canvas.coords(self._ring2, x1 - pad_inner, y1 - pad_inner, x2 + pad_inner, y2 + pad_inner)
+            self.canvas.itemconfig(self._ring2, outline=c2)
+
+        self._after = self.root.after(self.fps_ms, self._tick)
+
 
 
 @dataclass
@@ -111,10 +241,12 @@ class FixtureCheckSlotTest:
         text_wrap_pad: int = 8,
         text_justify: str = "center",
     ) -> None:
+
         self.root = root
         self.canvas = canvas
         self.assets = assets
         self.tag = tag
+        self.hit_tag = f"{self.tag}__hit"
         self.anchor = anchor
 
         self.skins = skins
@@ -138,7 +270,7 @@ class FixtureCheckSlotTest:
             y,
             image=self.assets[img_key],
             anchor=self.anchor,
-            tags=(self.tag, f"{self.tag}__img"),
+            tags=(self.tag, self.hit_tag, f"{self.tag}__img"),
         )
 
         # sau khi lấy img_key, lấy kích thước ảnh để tính wrap_width
@@ -159,7 +291,19 @@ class FixtureCheckSlotTest:
             anchor="center",
             width=wrap_w,              # <-- wrap word
             justify=text_justify,      # <-- align center multi-line
-            tags=(self.tag, f"{self.tag}__text"),
+            tags=(self.tag, self.hit_tag, f"{self.tag}__text"),
+        )
+
+
+        self._hover_fx_enabled = True
+        self._hover_fx = _UpgradeHoverFX(
+            root=self.root,
+            canvas=self.canvas,
+            tag=self.tag,
+            base_id=self.img_id,
+            text_id=self.text_id,
+            fps_ms=40,      # 25 fps-ish
+            extra_pad=6,
         )
 
         # Bind events
@@ -227,6 +371,14 @@ class FixtureCheckSlotTest:
         except Exception:
             pass
 
+        # --- ADD ---
+        try:
+            self._hover_fx.stop()
+        except Exception:
+            pass
+
+
+
     @property
     def ids(self) -> Tuple[int, int]:
         return (self.img_id, self.text_id)
@@ -250,6 +402,12 @@ class FixtureCheckSlotTest:
         if self._disabled:
             self._set_cursor("")
             self.canvas.itemconfig(self.text_id, fill=self.text_fill_disabled)
+
+            # --- ADD ---
+            try:
+                self._hover_fx.stop()
+            except Exception:
+                pass
         else:
             self._set_cursor("")
             self.canvas.itemconfig(self.text_id, fill=self.text_fill)
@@ -299,6 +457,10 @@ class FixtureCheckSlotTest:
         if self._disabled:
             self._set_cursor("")
             return "break"
+        
+        # --- ADD: bật FX khi hover ---
+        if self._hover_fx_enabled:
+            self._hover_fx.start()
 
         # only show hand cursor if clickable
         try:
@@ -317,6 +479,13 @@ class FixtureCheckSlotTest:
             self._set_cursor(self._prev_cursor)
         else:
             self._set_cursor("")
+
+        # --- ADD: tắt FX khi rời ---
+        try:
+            self._hover_fx.stop()
+        except Exception:
+            pass
+
         return "break"
 
     def _on_press(self, _event):

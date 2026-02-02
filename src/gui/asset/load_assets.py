@@ -41,7 +41,10 @@ FONT_ASSET = {
 
 ASSET_FILES = {
 
+
     # Fixture design
+
+    # Button confirm
     "fixture_button_confirm_normal_0.5": RESOURCE_PATH / "fixture" / "button_confirm_0_5.png",
     "fixture_button_confirm_hover_0.5": RESOURCE_PATH / "fixture" / "button_confirm_hover_0_5.png",
     "fixture_button_confirm_pressed_0.5": RESOURCE_PATH / "fixture" / "button_confirm_pressed_0_5.png",
@@ -56,6 +59,22 @@ ASSET_FILES = {
     "fixture_button_confirm_hover": RESOURCE_PATH / "fixture" / "button_confirm_hover.png",
     "fixture_button_confirm_pressed": RESOURCE_PATH / "fixture" / "button_confirm_pressed.png",
     "fixture_button_confirm_disabled": RESOURCE_PATH / "fixture" / "button_confirm_disabled.png",
+
+    # Button cancel
+    "fixture_button_cancel_normal_0.5": RESOURCE_PATH / "fixture" / "button_cancel_0_5.png",
+    "fixture_button_cancel_hover_0.5": RESOURCE_PATH / "fixture" / "button_cancel_hover_0_5.png",
+    "fixture_button_cancel_pressed_0.5": RESOURCE_PATH / "fixture" / "button_cancel_pressed_0_5.png",
+    "fixture_button_cancel_disabled_0.5": RESOURCE_PATH / "fixture" / "button_cancel_disabled_0_5.png",
+
+    "fixture_button_cancel_normal_0.75": RESOURCE_PATH / "fixture" / "button_cancel_0_75.png",
+    "fixture_button_cancel_hover_0.75": RESOURCE_PATH / "fixture" / "button_cancel_hover_0_75.png",
+    "fixture_button_cancel_pressed_0.75": RESOURCE_PATH / "fixture" / "button_cancel_pressed_0_75.png",
+    "fixture_button_cancel_disabled_0.75": RESOURCE_PATH / "fixture" / "button_cancel_disabled_0_75.png",
+
+    "fixture_button_cancel_normal": RESOURCE_PATH / "fixture" / "button_cancel.png",    
+    "fixture_button_cancel_hover": RESOURCE_PATH / "fixture" / "button_cancel_hover.png",    
+    "fixture_button_cancel_pressed": RESOURCE_PATH / "fixture" / "button_cancel_pressed.png",    
+    "fixture_button_cancel_disabled": RESOURCE_PATH / "fixture" / "button_cancel_disabled.png",    
 
     # Arrow _0.5 _0_5
     "fixture_arrow_to_right_0.5": RESOURCE_PATH / "fixture" / "arrow_to_right_0_5.png",

@@ -30,6 +30,7 @@ class FixtureConfig:
     ending_line: str      # actual chars: "\r\n" | "\n" | "\r" | ""
     timeout: float
     slot_text: Dict[int, str]
+    slot_command: Dict[int, str]
     slot_status: Dict[int, str] 
 
 def load_fixture_cfg(path: str) -> FixtureConfig:
@@ -45,9 +46,11 @@ def load_fixture_cfg(path: str) -> FixtureConfig:
     timeout = cfg.getfloat("FIXTURE", "timeout", fallback=2.0)
 
     slot_text: Dict[int, str] = {}
+    slot_command: Dict[int, str] = {}
     slot_status: Dict[int, str] = {}
     for i in range(1, 13):
         slot_text[i] = cfg.get("SLOT_TEST", f"slot{i}", fallback="").strip()
+        slot_command[i] = cfg.get("SLOT_COMMAND", f"slot{i}", fallback="").strip()
         slot_status[i] = cfg.get("SLOT_STATUS", f"slot{i}", fallback="idle").strip()
 
     return FixtureConfig(
@@ -56,6 +59,7 @@ def load_fixture_cfg(path: str) -> FixtureConfig:
         ending_line=ending_line,
         timeout=timeout,
         slot_text=slot_text,
+        slot_command=slot_command,
         slot_status=slot_status,
     )
 
