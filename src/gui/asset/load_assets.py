@@ -105,15 +105,18 @@ ASSET_FILES = {
     "fixture_circle_dock_status_listening_0.5": RESOURCE_PATH / "fixture" / "COM_STATUS_LISTENING_0_5.png",
     "fixture_circle_dock_status_stand_by_0.5": RESOURCE_PATH / "fixture" / "COM_STATUS_STAND_BY_0_5.png",
     "fixture_circle_dock_status_not_found_0.5": RESOURCE_PATH / "fixture" / "COM_STATUS_NOT_FOUND_0_5.png",
+    "fixture_circle_dock_status_error_0.5": RESOURCE_PATH / "fixture" / "COM_STATUS_ERROR_0_5.png",
 
     # _0.75 _0_75
     "fixture_circle_dock_status_listening_0.75": RESOURCE_PATH / "fixture" / "COM_STATUS_LISTENING_0_75.png",
     "fixture_circle_dock_status_stand_by_0.75": RESOURCE_PATH / "fixture" / "COM_STATUS_STAND_BY_0_75.png",
     "fixture_circle_dock_status_not_found_0.75": RESOURCE_PATH / "fixture" / "COM_STATUS_NOT_FOUND_0_75.png",
-    
+    "fixture_circle_dock_status_error_0.75": RESOURCE_PATH / "fixture" / "COM_STATUS_ERROR_0_75.png",
+
     "fixture_circle_dock_status_listening": RESOURCE_PATH / "fixture" / "COM_STATUS_LISTENING.png",
     "fixture_circle_dock_status_stand_by": RESOURCE_PATH / "fixture" / "COM_STATUS_STAND_BY.png",
     "fixture_circle_dock_status_not_found": RESOURCE_PATH / "fixture" / "COM_STATUS_NOT_FOUND.png",
+    "fixture_circle_dock_status_error": RESOURCE_PATH / "fixture" / "COM_STATUS_ERROR.png",
 
     # _0.5 _0_5
     "fixture_text_com999_0.5": RESOURCE_PATH / "fixture" / "TEXT_COMX_0_5.png",

@@ -9,7 +9,7 @@ import re
 
 
 Command = Optional[Callable[[], None]]
-ComStatus = Literal["not_found", "listening", "stand_by"]
+ComStatus = Literal["not_found", "listening", "stand_by", "error"]
 
 
 @dataclass
@@ -549,6 +549,7 @@ def bind_fixture_circle_com_status(
     not_found_bg: str = "fixture_circle_dock_status_not_found",
     listening_bg: str = "fixture_circle_dock_status_listening",
     stand_by_bg: str = "fixture_circle_dock_status_stand_by",
+    error_bg: str = "fixture_circle_dock_status_error",
     status: str | ComStatus = "not_found",
     label: str = "COM1",
     label_font: Optional[Any] = None,
@@ -608,11 +609,12 @@ def bind_fixture_circle_com_status(
             not_found_bg += "_0.5"
             listening_bg += "_0.5"
             stand_by_bg += "_0.5"
+            error_bg += "_0.5"
         elif canvas_width <= 1200:
             not_found_bg += "_0.75"
             listening_bg += "_0.75"
             stand_by_bg += "_0.75"
-
+            error_bg += "_0.75"
 
     skins = ComStatusSkins(
         not_found=not_found_bg,

@@ -24,6 +24,7 @@ from src.gui.widgets.canvas_log_widget import bind_canvas_log_widget
 from src.gui.fixture.fill_multiple_monitor import fullscreen_on_monitor, get_monitors, monitor_from_point
 from src.gui.fixture.get_fixture_port import get_fixture_port, parse_fixture_port_text
 from src.gui.fixture.get_serial_list import get_serial_ports
+from src.gui.fixture.listen_port import ListenPort
 from src.utils.config_go import load_fixture_cfg, choose_slot_font, reset_slot_status_section_to_idle, update_ini_slot_status, load_slot_status_from_ini, SlotStatus, _ALLOWED_STATUS,update_ini_fixture_section
 from src.gui.widgets.dialog import ModalOverlay
 import tkinter.font as tkfont
@@ -276,7 +277,10 @@ class AppGUI:
         self.emit_msg = self.logger.info
         self._log_lock = getattr(self.logger, "_log_lock", threading.Lock())
 
-        # Task management
+        self.listenport = None
+        self.current_com_response = ""
+
+        # Task management (no use)
         self._task_handler = None
         self._running = False
 
@@ -304,6 +308,10 @@ class AppGUI:
         self.runner = sub_thread.SubProcessRunner(self.root)
 
         self.taskq = sub_thread.SequentialTaskQueue(root=self.root, runner=self.runner)
+
+        # For sending commands
+        self.io_runner = sub_thread.SubThreadRunner(self.root)
+        self.io_taskq = sub_thread.SequentialTaskQueue(root=self.root, runner=self.io_runner)
 
         # Setting root
         self.root.title("GUI Tkinter")
@@ -347,7 +355,11 @@ class AppGUI:
 
         self._resolve_COM()
 
+        
+
         self._refresh_gui()
+
+        # self.root.after(3000, self.send_to_com("?"))
         ### Example usage of slot status update
         # self.update_slot_status(slot_id=1, status="testing")
         # self.update_slot_status(slot_id=6, status="testing")
@@ -434,9 +446,24 @@ class AppGUI:
             ui_max_lines=100,
             buf_max_lines=500,
         )
-
         widgets["logs"] = logs
 
+        # Bind button
+        send_test_cmd_btn = bind_canvas_button(
+            root=win,
+            canvas=canvas,
+            assets=self.assets,
+            normal_status="fixture_button_confirm_normal",
+            hover_status="fixture_button_confirm_hover",
+            active_status="fixture_button_confirm_pressed",
+            disabled_status="fixture_button_confirm_disabled",
+            tag="send_test_cmd_button",
+            x=x+400, y=y,
+            text="",
+            command=lambda: self.send_to_com("?"),
+        )
+
+        widgets["send_test_cmd_button"] = send_test_cmd_btn
         return widgets
     
     def _refresh_gui(self):
@@ -487,10 +514,45 @@ class AppGUI:
                 com1.set_label(result)
                 if result == "COMX":
                     com1.set_status("not_found")
-                else: 
-                    com1.set_status("listening")
-                    
+                else:
+                    try:
+                        dispatch = lambda fn: self.root.after(0, fn)
+                        self.listenport = ListenPort(
+                            port=self.port,
+                            baudrate=self.baudrate,
+                            log=self.emit_msg,                 # optional
+                            on_rx=lambda s: self._update_logs_panel(f"RX: {s}", "white"),
+                            dispatch=dispatch,
+                        )
+                        self.listenport.start()
+                        com1.set_status("listening")
+                    except Exception as e:
+                        self._update_logs_panel(f"Error starting ListenPort: {e}", "red")
+                        com1.set_status("error")
             com1.set_disabled(True)
+
+    def send_to_com(self, cmd: str):
+        def _do():
+            if not self.listenport:
+                raise RuntimeError("ListenPort not initialized")
+            ok, lines = self.listenport.send_and_collect(cmd=cmd, append_crlf=True)
+            return ok, lines
+
+        def _ok(result, _meta):
+            ok, lines = result
+            self._update_logs_panel(f"TX: {cmd} | RX lines: {len(lines)}", "blue")
+            if lines:
+                self._update_logs_panel(f"RX last: {lines[-1]}", "green" if ok else "yellow")
+
+        self.io_taskq.submit(
+            func=_do,
+            name="Send to COM",
+            on_start=self._task_start_cb,
+            on_success=_ok,
+            on_error=self._task_error_cb,
+            on_finally=self._task_finally_cb,
+        )
+
 
     def reset_slot_status(self):
         def _do():
@@ -607,15 +669,17 @@ class AppGUI:
         self._update_logs_panel(f"{name}...", "yellow")
 
     def _task_progress_cb(self, payload):
-        message = payload["message"]
-        port = payload["port"]
-        baudrate = payload["baudrate"]
-        ending_line = payload["ending_line"]
+        if not isinstance(payload, dict):
+            return
+        self.message = payload["message"]
+        self.port = payload["port"]
+        self.baudrate = payload["baudrate"]
+        self.ending_line = payload["ending_line"]
         # message = getattr(payload, "message", str(payload))
-        self._update_logs_panel(f"{message}")
-        self._update_logs_panel(f"port: {port}")
-        self._update_logs_panel(f"baudrate: {baudrate}")
-        self._update_logs_panel(f"ending_line: {ending_line}")
+        self._update_logs_panel(f"{self.message}")
+        self._update_logs_panel(f"port: {self.port}")
+        self._update_logs_panel(f"baudrate: {self.baudrate}")
+        self._update_logs_panel(f"ending_line: {self.ending_line}")
 
     def _task_error_cb(self, payload, meta):
         self._update_logs_panel(f"Error: {payload}", color="red")

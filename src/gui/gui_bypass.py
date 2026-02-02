@@ -67,7 +67,7 @@ class AppGUI:
         self.runner = sub_thread.SubProcessRunner(self.root)
 
         # Setting root
-        self.root.title("GUI Tkinter")
+        self.root.title("GUI ByPASS: Warning Usage")
         self.root.geometry(f"{W}x{H}")
         self.root.resizable(False, False)
         self.tektur_font = tkfont.Font(family="Tektur", size=11)
