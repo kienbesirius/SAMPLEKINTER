@@ -40,9 +40,12 @@ FONT_ASSET = {
 }
 
 ASSET_FILES = {
-
-
     # Fixture design
+    "fixture_sensor_in_guide_240x240": RESOURCE_PATH / "fixture" / "fixture_sensor_in_guide_240x240.png",
+    "fixture_close_guide_240x240": RESOURCE_PATH / "fixture" / "fixture_close_guide_240x240.png",
+    "fixture_stop_guide_240x240": RESOURCE_PATH / "fixture" / "fixture_stop_guide_240x240.png",
+    "fixture_reset_guide_240x240": RESOURCE_PATH / "fixture" / "fixture_reset_guide_240x240.png",
+    "fixture_240x240": RESOURCE_PATH / "fixture" / "fixture_240x240.png",
 
     # Button confirm
     "fixture_button_confirm_normal_0.5": RESOURCE_PATH / "fixture" / "button_confirm_0_5.png",

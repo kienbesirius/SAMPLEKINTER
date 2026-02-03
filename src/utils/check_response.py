@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import time
 import serial
+import random
+import re
 
 PORT = "/dev/ttyUSB4"
 BAUDRATE = 9600
@@ -58,33 +60,6 @@ HELP_RESPONSE = """[08:31:32:400] CONTROL CAMMAND:
 [08:31:32:675] GET_POSI_:GET_POSI_
 [08:31:32:675] READ_PARA_MOTOR:GET MOTOR PARAMETER
 [08:31:32:675] CLEAR_PARA_MOTOR:CLEAR MOTOR PARAMETER
-[08:31:41:011] NG
-[08:31:41:011] <break>
-[08:32:00:084] MCU Flash Size:256 KB,APP MAX Size:244 KB
-[08:32:00:100] BJ_F1_BootLoader_FW_V203,Date:May 21 2025_10:18:26
-[08:32:00:116] APP_ADDR:0x5000
-[08:32:00:372] APP
-[08:32:00:867] SN:BU1-ZHBJ-A04-F887
-[08:32:03:886] INITIAL OK
-[08:32:03:886] SET VOLUME 5 OK
-[08:32:03:886] MOTOR_R ORIGIN OK
-[08:32:03:902] MOTOR_C ORIGIN OK
-[08:32:03:902] MOTOR_L ORIGIN OK
-[08:32:08:109] <break>
-[08:32:09:865] MCU Flash Size:256 KB,APP MAX Size:244 KB
-[08:32:09:881] BJ_F1_BootLoader_FW_V203,Date:May 21 2025_10:18:26
-[08:32:09:881] APP_ADDR:0x5000
-[08:32:10:153] APP
-[08:32:10:648] SN:BU1-ZHBJ-A04-F887
-[08:32:13:667] INITIAL OK
-[08:32:13:667] SET VOLUME 5 OK
-[08:32:13:667] MOTOR_R ORIGIN OK
-[08:32:13:683] MOTOR_C ORIGIN OK
-[08:32:13:683] MOTOR_L ORIGIN OK
-[08:32:17:005] OK
-[08:32:17:005] MOTOR_R ORIGIN OK
-[08:32:17:005] MOTOR_C ORIGIN OK
-[08:32:17:005] MOTOR_L ORIGIN OK
 """
 
 HELP_BYTES = (HELP_RESPONSE.strip("\n").replace("\n", "\r\n") + "\r\n").encode("utf-8", errors="replace")
@@ -93,7 +68,7 @@ def write_all(
     ser: serial.Serial,
     data: bytes,
     *,
-    chunk_size: int = 128,        # 128B @9600baud ~0.13s để transmit
+    chunk_size: int = 128,
     retry_sleep: float = 0.01,
 ) -> None:
     mv = memoryview(data)
@@ -109,13 +84,25 @@ def write_all(
                 else:
                     time.sleep(retry_sleep)
             except serial.SerialTimeoutException:
-                # Hết thời gian cho lần write hiện tại -> chờ rồi thử tiếp
                 time.sleep(retry_sleep)
         i += len(chunk)
-
-    # flush() có thể block lâu (chờ transmit hết). Nếu không cần “đảm bảo ra dây hết”
-    # thì bạn có thể bỏ flush().
     ser.flush()
+
+def _send_line(ser: serial.Serial, s: str) -> None:
+    # luôn trả về theo CRLF cho giống fixture style
+    payload = (s.strip() + "\r\n").encode("utf-8", errors="replace")
+    write_all(ser, payload)
+
+def _norm_cmd(raw: bytes) -> str:
+    # decode + normalize: IN_CLOSE, IN:CLOSE, "IN   CLOSE" -> "IN CLOSE"
+    try:
+        s = raw.decode("utf-8", errors="replace").strip()
+    except Exception:
+        s = str(raw).strip()
+    s = s.upper()
+    s = re.sub(r"[\t:_]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
 
 def main() -> None:
     print(f"Listening on {PORT} @ {BAUDRATE} ... (Ctrl+C to stop)")
@@ -123,12 +110,79 @@ def main() -> None:
         PORT,
         BAUDRATE,
         timeout=0,         # non-blocking read
-        write_timeout=1.0, # tránh kẹt write
+        write_timeout=1.0,
     ) as ser:
         buf = bytearray()
         last_rx = time.monotonic()
 
+        # FORCE STOP spam state (không block loop)
+        spam_active = False
+        spam_end = 0.0
+        spam_next = 0.0
+
+        def _handle_command(line_bytes: bytes) -> None:
+            nonlocal spam_active, spam_end, spam_next
+
+            cmd = _norm_cmd(line_bytes)
+            if not cmd:
+                return
+
+            # '?' -> HELP
+            if cmd == "?":
+                print("RX '?' -> send HELP")
+                write_all(ser, HELP_BYTES)
+                return
+
+            # --- CASES bạn yêu cầu ---
+            if cmd == "IN CLOSE" or cmd == "CLOSE" or cmd == "IN":
+                print("RX 'IN CLOSE' -> close fixture ok")
+                _send_line(ser, "close fixture ok")
+                return
+
+            if cmd == "OUT OPEN" or cmd == "OPEN" or cmd == "OUT":
+                print("RX 'OUT OPEN' -> open fixture ok")
+                _send_line(ser, "open fixture ok")
+                return
+
+            if cmd == "FORCE STOP":
+                # random: hoặc trả STOPPED, hoặc spam NG/timeout/EMC trong 3 giây
+                choice = random.choice(["STOPPED", "SPAM"])
+                if choice == "STOPPED":
+                    print("RX 'FORCE STOP' -> STOPPED")
+                    _send_line(ser, "STOPPED")
+                else:
+                    print("RX 'FORCE STOP' -> spam NG/timeout/EMC for 3s")
+                    spam_active = True
+                    now = time.monotonic()
+                    spam_end = now + 3.0
+                    spam_next = now  # send ngay
+                return
+
+            if cmd in ("RESET", "S_SYSTEM_RST", "SYSTEM RST"):
+                out = random.choice(["reset ok", "fixture reset ok"])
+                print(f"RX '{cmd}' -> {out}")
+                _send_line(ser, out)
+                return
+
+            if ("SENSOR" in cmd) or (cmd in ("CHECK SENSOR", "CHECK_SENSOR")):
+                out = random.choice(["close failed", "not ok"])
+                print(f"RX '{cmd}' -> {out}")
+                _send_line(ser, out)
+                return
+
+            # fallback: echo nhẹ để debug (tuỳ bạn muốn bỏ)
+            print(f"RX '{cmd}' -> (no rule)")
+
         while True:
+            # tick spam (nếu đang spam FORCE STOP)
+            if spam_active:
+                now = time.monotonic()
+                if now >= spam_end:
+                    spam_active = False
+                elif now >= spam_next:
+                    spam_next = now + random.uniform(0.12, 0.35)
+                    _send_line(ser, random.choice(["NG", "timeout", "EMC"]))
+
             n = ser.in_waiting or 0
             if n:
                 chunk = ser.read(n)
@@ -136,9 +190,8 @@ def main() -> None:
                     buf.extend(chunk)
                     last_rx = time.monotonic()
 
-                # tách theo CR/LF (nếu bên kia gửi theo dòng)
+                # tách theo CR/LF
                 while True:
-                    # tìm vị trí CR hoặc LF đầu tiên
                     pos_cr = buf.find(b"\r")
                     pos_lf = buf.find(b"\n")
                     positions = [p for p in (pos_cr, pos_lf) if p != -1]
@@ -148,26 +201,23 @@ def main() -> None:
                     pos = min(positions)
                     line = bytes(buf[:pos]).strip()
 
-                    # consume hết CR/LF liên tiếp
+                    # consume CR/LF liên tiếp
                     j = pos
                     while j < len(buf) and buf[j] in (10, 13):
                         j += 1
                     del buf[:j]
 
-                    if line == b"?":
-                        print("RX '?' -> send HELP")
-                        write_all(ser, HELP_BYTES)
+                    if line:
+                        _handle_command(line)
 
             else:
-                # trường hợp chỉ gửi đúng 1 byte '?' không có newline:
+                # trường hợp gửi đúng 1 byte '?' không có newline:
                 now = time.monotonic()
                 if buf.strip() == b"?" and (now - last_rx) > 0.05:
                     buf.clear()
-                    print("RX '?' (no newline) -> send HELP")
-                    write_all(ser, HELP_BYTES)
+                    _handle_command(b"?")
 
                 time.sleep(0.01)
-
 
 if __name__ == "__main__":
     try:

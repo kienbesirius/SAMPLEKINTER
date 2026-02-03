@@ -482,6 +482,19 @@ class AppGUI:
             anchor="nw",
             command=lambda w=win: self.show_admin_auth_dialog(win=w),
         )
+
+        fixture_dummy = bind_canvas_asset(
+            root=win,
+            canvas=canvas,
+            assets=self.assets,
+            tag="fixture_dummy",
+            x=sw-240, y=0,
+            anchor="nw",
+            right_key="fixture_240x240",
+            state="normal",
+        )
+
+        widgets[f"fixture_dummy"] = fixture_dummy
         # # Bind button
         # send_test_cmd_btn = bind_canvas_button(
         #     root=win,

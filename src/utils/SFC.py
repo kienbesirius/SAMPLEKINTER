@@ -237,7 +237,7 @@ def get_bound_session(source_ip: str | None) -> requests.Session:
 
 _session = get_bound_session(get_full_ip_from_head_ip(configparser.get("SFCConfig", "source_ip", fallback="172.24")))
 
-from __future__ import annotations
+
 from pathlib import Path
 from datetime import datetime
 import os, sys
@@ -362,7 +362,7 @@ LOG_TZ = "Asia/Bangkok"   # timezone for timestamps
 LOG_AUTOFUSH = False      # fsync after each write (False for speed)
 LOG_ALSO_PRINT = False    # echo logs to stdout as well
 
-def _log(msg: object, *, label: str | None = None) -> None:
+def _log(msg: object, label: str | None = None) -> None:
     # label=None will use write_log's default [INFO]
     write_log(
         msg, label=label, tz=LOG_TZ,
@@ -435,7 +435,7 @@ def sendDataAPI(requestBody):
 
         SMOConfig = resGet
         # get SMOConfig with GROUP_NAME=VI3
-        dataSMO = next((item for item in SMOConfig["Data"] if item["GROUP_NAME"] == "VI3"), None)
+        dataSMO = next((item for item in SMOConfig["Data"] if item["GROUP_NAME"] == TEST_GROUP), None)
         if dataSMO is None:
             msg = "FAIL|This GROUP_NAME=VI3 haven't config in SFC yet!"
             print(msg)
@@ -455,8 +455,10 @@ def sendDataAPI(requestBody):
         dataCommand1 = dataPostRespon['COMMAND1']
         _log(f"COMMAND1 <- '{dataCommand1.strip()}'", "DEBUG")
 
-        checkOutput(dataCommand1.strip())
+        result = checkOutput(dataCommand1.strip())
         _log("bypass [ ] done.", "DEBUG")
+
+        return result
     except Exception as e:
         msg = f"FAIL|{e}"
         print(msg)
@@ -475,6 +477,8 @@ def checkOutput(data):
         out = f"Result=FAIL|Return={data}"
         print(out)
         _log(out, "ERROR")
+
+    return out
 
 def getDataTestingFormatte(SN):
     parts = [

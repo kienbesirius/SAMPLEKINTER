@@ -211,6 +211,7 @@ _DSN_RE = re.compile(r"^[A-Za-z0-9._-]{6,64}$")
 # ----------------------------
 # Worker (MUST be top-level for SubProcessRunner on Windows spawn)
 # ----------------------------
+from src.utils.SFC import do_bypass_simple
 
 def bypass_worker(dsn: str, *, cancel_event=None, progress_cb=None) -> Dict[str, Any]:
     """
@@ -220,24 +221,20 @@ def bypass_worker(dsn: str, *, cancel_event=None, progress_cb=None) -> Dict[str,
     TODO: thay phần mô phỏng dưới đây bằng logic bypass thật của bạn.
     """
     dsn = (dsn or "").strip()
-
-    # Simulate some work (replace with COM/API calls)
-    for i in range(8):
-        if cancel_event is not None and getattr(cancel_event, "is_set", None) and cancel_event.is_set():
-            return {"ok": False, "status": "cancelled", "dsn": dsn, "msg": "Cancelled"}
-        time.sleep(0.12)
-        if progress_cb is not None:
-            try:
-                progress_cb({"step": i + 1, "total": 8})
-            except Exception:
-                pass
-
-    # Simple validation demo
-    if not dsn or not _DSN_RE.match(dsn):
-        return {"ok": False, "status": "fail", "dsn": dsn, "msg": "DSN format invalid"}
-
-    # Example pass
-    return {"ok": True, "status": "pass", "dsn": dsn, "msg": "Bypass OK"}
+    result = do_bypass_simple(SN=dsn)
+    # Check Start result out = f"Result=PASS|{data}"
+    if not result:
+        return {"ok": False, "msg": "Bypass returned no result"}
+    
+    try:
+        if result.startswith("Result=PASS"):
+            data = result.split("|", 1)[1] if "|" in result else ""
+            # out = f"Result=PASS|Return={data}"
+            return {"ok": True, "msg": data}
+        # out = f"Result=FAIL|Return={data}"
+        return {"ok": False, "msg": result}
+    except Exception as e:
+        return {"ok": False, "msg": f"Bypass exception: {e}"}
 
 
 class AppGUI:
