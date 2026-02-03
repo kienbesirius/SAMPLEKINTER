@@ -322,6 +322,8 @@ class FixtureCheckSlotTest:
             self._set_state(kw["state"])
         if "status" in kw:
             self.set_status(kw["status"])
+        if "font" in kw:
+            self.canvas.itemconfig(self.text_id, font=kw["font"])
         if "text" in kw:
             self.canvas.itemconfig(self.text_id, text=kw["text"])
         if "command" in kw:

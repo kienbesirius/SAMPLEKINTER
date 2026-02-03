@@ -719,7 +719,9 @@ class AppGUI:
                 for win in self._iter_windows():
                     slot = self._get_widgets(win).get(f"slot{slot_idx}")
                     if slot:
-                        slot.set_text(new_test)
+                        # CConfigure text and text size
+                        slot.configure(text=new_test, font=choose_slot_font(new_test))
+                        # slot.set_text(new_test)
                         self.reload_slot_status()
 
                     self._update_logs_panel(

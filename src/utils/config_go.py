@@ -121,19 +121,24 @@ def update_ini_fixture_section(
 
 def choose_slot_font(label: str) -> Tuple[str, int, str]:
     label = (label or "").strip()
-    if not label:
-        return ("Tektur", 13, "bold")
-    if len(label) <= 4:
-        return ("Tektur", 17, "bold")     # IN/OUT
-    if len(label) <= 5:
-        return ("Tektur", 11, "bold")     # RESET
-    if len(label) <= 8 and " " not in label:
+    # Check if contain SPACE
+    # If there is a word with len 6 or more, use smaller font
+    words = label.split(" ")
+    # find max len in words
+    max_len = max(len(w) for w in words)
+    if max_len == 4:
+        return ("Tektur", 12, "bold")
+    if max_len == 5:
+        return ("Tektur", 11, "bold")
+    if max_len == 6:
         return ("Tektur", 9, "bold")
-    if len(label) <= 8 and " " in label:
-        return ("Tektur", 13, "bold")
+    if max_len == 7:
+        return ("Tektur", 8, "bold")
+    if max_len == 8:
+        return ("Tektur", 7, "bold")
+    if max_len <= 3:
+        return ("Tektur", 14, "bold")
     return ("Tektur", 11, "bold")         # FORCE STOP
-
-
 
 _SLOT_RE = re.compile(r"^(\s*)(slot)(\d+)(\s*=\s*)(.*?)(\s*)$", re.IGNORECASE)
 _SECTION_RE = re.compile(r"^\s*\[([^\]]+)\]\s*$")
