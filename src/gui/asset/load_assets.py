@@ -221,10 +221,17 @@ ASSET_FILES = {
     "text_wide_1_area": RESOURCE_PATH / "blank" / "text-wide-1-area.png", # 12 char (+5)
     "text_wide_2_area": RESOURCE_PATH / "blank" / "text-wide-2-area.png", # 17 char (+5)
     "text_wide_3_area": RESOURCE_PATH / "blank" / "text-wide-3-area.png", # 22 char (+5)
+    "bypass_notice_title": RESOURCE_PATH / "blank" / "bypass_Notice_Title.png",
+    "pass_title": RESOURCE_PATH / "blank" / "PASS.png",
+    "fail_title": RESOURCE_PATH / "blank" / "FAIL.png",
+    "standby_title": RESOURCE_PATH / "blank" / "STANDBY.png",
+
+
 
     # Specific designs
     "images_dimension": IMAGES_PATH / "dimension_constraints.png",
     "notice_title": RESOURCE_PATH / "gui204_count_primes" / "Notice_Title.png",
+    
     "279_notice_title": RESOURCE_PATH / "gui279_perfect_squares" / "279_Notice_Title.png",
     "entry_field_normal": RESOURCE_PATH / "gui204_count_primes" / "entry-field-normal.png",
     "entry_field_disabled": RESOURCE_PATH / "gui204_count_primes" / "entry-field-disabled.png",

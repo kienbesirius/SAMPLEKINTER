@@ -72,6 +72,8 @@ class CanvasEntry:
         ph_dy: int = 0,
         lbl_dx: int = 27,
         lbl_dy: int = 12,
+        password: bool = False,
+        password_char: str = "•",
         on_submit: OnSubmit = None,
         state: str = "normal",  # "normal" | "disabled"
         background_normal: str = "white",
@@ -94,6 +96,12 @@ class CanvasEntry:
 
         if entry_kwargs is None:
             entry_kwargs = {}
+
+        # ---- password mode (mask input) ----
+        self._password_char = str(password_char or "•")
+        self._password_enabled = bool(password)
+        if self._password_enabled and ("show" not in entry_kwargs):
+            entry_kwargs["show"] = self._password_char
 
         # ---- size from normal skin ----
         img_w = self.assets[self.skins.normal].width()
@@ -394,6 +402,8 @@ def bind_canvas_entry(
     ph_dy: int = 0,
     lbl_dx: int = 27,
     lbl_dy: int = 12,
+    password: bool = False,
+    password_char: str = "•",
     on_submit: OnSubmit = None,
     state: str = "normal",
 ) -> CanvasEntry:
@@ -454,6 +464,8 @@ def bind_canvas_entry(
         ph_dy=ph_dy,
         lbl_dx=lbl_dx,
         lbl_dy=lbl_dy,
+        password=password,
+        password_char=password_char,
         on_submit=on_submit,
         state=state,
     )

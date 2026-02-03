@@ -1,3 +1,4 @@
+import hashlib
 import os
 import re
 import sys
@@ -17,6 +18,7 @@ from src.utils.buffer_logger import build_log_buffer
 from src.gui.widgets.button import bind_canvas_button
 from src.gui.widgets.entry import bind_canvas_entry
 from src.gui.widgets.text_area import bind_canvas_text_area
+from src.gui.widgets.text import bind_canvas_text
 from src.gui.widgets.fixture_check_slot_test import bind_fixture_check_slot_test
 from src.gui.widgets.fixture_circle_status import bind_fixture_circle_com_status
 from src.gui.widgets.paint_asset import bind_canvas_asset
@@ -274,6 +276,7 @@ class AppGUI:
             
     def __init__(self, root: tk.Tk):
         # Build log buffer
+        self.is_admin = False
         self.cfg_path = app_dir() / "config.ini"
         self.status_map = load_slot_status_from_ini(self.cfg_path)
 
@@ -419,6 +422,7 @@ class AppGUI:
                 text=text,
                 text_font=font,
                 command=lambda idx=i, w=win: self.show_manual_config_command(win=w, slot_idx=idx),
+                is_admin=self.is_admin,
             )
 
             widgets[f"slot{i}"] = slot
@@ -457,6 +461,27 @@ class AppGUI:
         )
         widgets["logs"] = logs
 
+        # Create a Text line Powered by Bế Chí Kiên above the log panel
+        credit_x_axis = sw - (self.assets["fixture_info_frame_bg"].width())
+        credit_y_axis = sh - (self.assets["fixture_info_frame_bg"].height()) - 24
+        credit = canvas.create_text(credit_x_axis, credit_y_axis, text=("Powered by bechjkjen"), font=("Tektur", 12, "bold"), fill="#FFB14A", anchor="nw")
+        credit_y_axis -= 24
+
+        mode_oper = bind_canvas_text(
+            root=win,
+            canvas=canvas,
+            tag="mode_oper",
+            x=credit_x_axis,
+            y=credit_y_axis,
+            text=("ADMIN" if self.is_admin else "OPER"),
+            text_font=("Tektur", 12, "bold"),
+            fill=("#FFE37A" if self.is_admin else "white"),
+            active_fill="#FFD24A",
+            disabled_fill="#CFCFCF",
+            cooldown_ms=1250,
+            anchor="nw",
+            command=lambda w=win: self.show_admin_auth_dialog(win=w),
+        )
         # # Bind button
         # send_test_cmd_btn = bind_canvas_button(
         #     root=win,
@@ -474,7 +499,8 @@ class AppGUI:
         # widgets["send_test_cmd_button"] = send_test_cmd_btn
         #### BUTTON CHECK OKAY!!!
         
-
+        widgets["credit"] = credit
+        widgets["mode_oper"] = mode_oper
 
         avoid = ["com_status", "logs_panel"] + [f"slot{i}_status" for i in range(1, 13)]
 
@@ -502,8 +528,6 @@ class AppGUI:
         # Dialog must be always last to create 
         modal = ModalOverlay(win)
         widgets["modal"] = modal
-
-
 
         return widgets
     
@@ -832,6 +856,259 @@ class AppGUI:
             win.after(50, cmd_entry.focus_set)
         except Exception:
             pass
+
+    
+
+    # ---------------------------
+    # Admin Authentication (OPER <-> ADMIN)
+    # ---------------------------
+    def _admin_mode_label(self) -> str:
+        return "ADMIN" if self.is_admin else "OPER"
+
+    def _get_admin_secret(self) -> str:
+        return "Foxconn168!!bechjkjen"
+
+    def _verify_admin_password(self, pw: str) -> bool:
+        secret = self._get_admin_secret()
+        return pw == secret
+
+    def _broadcast_admin_mode(self) -> None:
+        """
+        Broadcast is_admin xuống:
+          - mode_oper button text
+          - slot command (cho phép click chỉnh sửa)
+          - slot hover gating (nếu widget support)
+        """
+        for w in self._iter_windows():
+            ws = self._get_widgets(w)
+
+            # update mode button text
+            btn = ws.get("mode_oper")
+            if btn:
+                try:
+                    btn.configure(text=self._admin_mode_label())
+                except Exception:
+                    pass
+
+            # update slots
+            for i in range(1, 13):
+                slot = ws.get(f"slot{i}")
+                if not slot:
+                    continue
+
+                cmd = (lambda idx=i, win=w: self.show_manual_config_command(win=win, slot_idx=idx)) if self.is_admin else None
+
+                try:
+                    slot.configure(command=cmd)
+                except Exception:
+                    try:
+                        slot.command = cmd
+                    except Exception:
+                        pass
+
+                # gate hover fx if supported
+                try:
+                    slot.configure(is_admin=self.is_admin)
+                except Exception:
+                    try:
+                        setattr(slot, "is_admin", self.is_admin)
+                    except Exception:
+                        pass
+
+    def show_admin_auth_dialog(self, *, win: tk.Misc | None = None) -> None:
+        """
+        Dialog canvas-style: nhập mật khẩu -> toggle self.is_admin -> broadcast lại slots.
+        """
+
+        if self.is_admin:
+            # đang là admin, hỏi có muốn chuyển về oper không
+            self.is_admin = False
+            self._broadcast_admin_mode()
+            try:
+                self._update_logs_panel(f"[admin] mode -> {self._admin_mode_label()}", "yellow")
+            except Exception:
+                pass
+            return
+        
+        win = win or self.root
+        modal = self._get_modal(win)
+        if not modal:
+            return
+
+        modal.clear_dialog()
+
+        box = tk.Frame(modal.dialog, bg="#222222")
+        box.pack(fill="both", expand=True)
+
+        # -------- dialog canvas (nằm trong modal.dialog Frame) --------
+        dialog_bg_key = (
+            "fixture_info_frame_bg_480"
+            if "fixture_info_frame_bg_480" in self.assets
+            else ("fixture_info_frame_bg" if "fixture_info_frame_bg" in self.assets else "")
+        )
+        bg_img = self.assets.get(dialog_bg_key)
+        W = int(bg_img.width()) if bg_img else 720
+        H = int(bg_img.height()) if bg_img else 420
+        cv = tk.Canvas(
+            modal.dialog,
+            width=W,
+            height=H,
+            highlightthickness=0,
+            bd=0,
+            bg="#222222",
+        )
+        cv.pack(padx=0, pady=0)
+
+        # cực quan trọng: để bind_canvas_button() lấy đúng winfo_width() khi auto scale fixture_* keys
+        try:
+            modal.dialog.update_idletasks()
+            cv.update_idletasks()
+        except Exception:
+            pass
+
+        # background image (nếu có)
+        if bg_img:
+            bg_id = cv.create_image(W // 2, H // 2, image=bg_img)
+            cv.tag_lower(bg_id)
+        else:
+            cv.create_rectangle(0, 0, W, H, fill="#222222", outline="")
+
+        title_font = ("Tektur", 16, "bold")
+        label_font = ("Tektur", 12, "bold")
+        value_font = ("Tektur", 12)
+
+        cv.create_text(
+            W // 2, 42,
+            text="ADMIN AUTHENTICATION",
+            font=title_font,
+            fill="white",
+            anchor="center",
+        )
+
+        cv.create_text(
+            W // 2, 78,
+            text=f"Current Mode: {self._admin_mode_label()}",
+            font=value_font,
+            fill="#FFE37A",
+            anchor="center",
+        )
+
+        # Password label
+        cv.create_text(68, 140, text="MẬT KHẨU:", font=label_font, fill="white", anchor="w")
+
+        # Entry (masked)
+        pw_entry = bind_canvas_entry(
+            root=modal.dialog,
+            canvas=cv,
+            assets=self.assets,
+            x=W // 2,
+            y=192,
+            field_label="Admin",
+            field_label_fill="#FFE37A",
+            name="admin_password",
+            # auto_skin_by_label=False,
+            placeholder="Nhập mật khẩu...",
+            font=("Tektur", 12),
+            state="normal",
+            password=True,          # ✅ NEW: bật mask
+            password_char="•",      # ✅ NEW: ký tự mask (tuỳ)
+        )
+
+        # Error text (hidden by default)
+        err_id = cv.create_text(
+            W // 2, 238,
+            text="",
+            font=("Tektur", 11, "bold"),
+            fill="#FF5C5C",
+            anchor="center",
+        )
+
+        def _set_err(msg: str):
+            try:
+                cv.itemconfig(err_id, text=msg)
+            except Exception:
+                pass
+
+        def _confirm(pw: str = ""):
+            pw = (pw or pw_entry.get() or "").strip()
+            if not self._verify_admin_password(pw):
+                _set_err("Sai mật khẩu.")
+                return
+
+            # toggle admin
+            self.is_admin = not self.is_admin
+            self._broadcast_admin_mode()
+
+            try:
+                self._update_logs_panel(f"[admin] mode -> {self._admin_mode_label()}", "yellow")
+            except Exception:
+                pass
+
+            modal.hide()
+
+        def _cancel():
+            modal.hide()
+
+        # Enter submit
+        try:
+            pw_entry.configure(on_submit=lambda s: _confirm(s))
+        except Exception:
+            pass
+
+        # Buttons
+        cx = W // 2
+        by = H - 58
+
+        btn_cancel = bind_canvas_button(
+            root=win,
+            canvas=cv,
+            assets=self.assets,
+            normal_status="fixture_button_cancel_normal",
+            hover_status="fixture_button_cancel_hover",
+            active_status="fixture_button_cancel_pressed",
+            disabled_status="fixture_button_cancel_disabled",
+            tag="admin_cancel_button",
+            x=cx - 120,
+            y=by,
+            text="",
+            cooldown_ms=250,
+            command=_cancel,
+        )
+
+        btn_confirm = bind_canvas_button(
+            root=win,
+            canvas=cv,
+            assets=self.assets,
+            normal_status="fixture_button_confirm_normal",
+            hover_status="fixture_button_confirm_hover",
+            active_status="fixture_button_confirm_pressed",
+            disabled_status="fixture_button_confirm_disabled",
+            tag="admin_confirm_button",
+            x=cx + 120,
+            y=by,
+            text="",
+            cooldown_ms=250,
+            command=_confirm,
+        )
+
+        # make sure buttons are on top
+        try:
+            cv.tag_raise(btn_cancel.img_id)
+            cv.tag_raise(btn_confirm.img_id)
+        except Exception:
+            pass
+
+        # focus password
+        try:
+            pw_entry.focus_set()
+        except Exception:
+            try:
+                pw_entry.widget.focus_set()
+            except Exception:
+                pass
+
+        modal.show(dim_level=0.45)
+
 
 
     def _get_modal(self, win: tk.Misc) -> "ModalOverlay | None":
