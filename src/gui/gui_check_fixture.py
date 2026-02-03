@@ -25,7 +25,7 @@ from src.gui.fixture.fill_multiple_monitor import fullscreen_on_monitor, get_mon
 from src.gui.fixture.get_fixture_port import get_fixture_port, parse_fixture_port_text
 from src.gui.fixture.get_serial_list import get_serial_ports
 from src.gui.fixture.listen_port import ListenPort
-from src.utils.config_go import load_fixture_cfg, choose_slot_font, reset_slot_status_section_to_idle, update_ini_slot_status, load_slot_status_from_ini, SlotStatus, _ALLOWED_STATUS,update_ini_fixture_section
+from src.utils.config_go import load_fixture_cfg, choose_slot_font, reset_slot_status_section_to_idle, update_ini_slot_status, load_slot_status_from_ini, SlotStatus, _ALLOWED_STATUS,update_ini_fixture_section, update_ini_manual_slot_info
 from src.gui.widgets.dialog import ModalOverlay
 import tkinter.font as tkfont
 
@@ -261,7 +261,11 @@ class AppGUI:
 
                 # sw, sh = win.winfo_width(), win.winfo_height()
                 win._widgets = self._build_gui(win=win, canvas=canvas, sw=sw, sh=sh)
-                win.protocol("WM_DELETE_WINDOW", lambda w=win: self._close_all_windows(w))
+                win.protocol("WM_DELETE_WINDOW", lambda w=win: self._guarded_close(w))
+
+                # Nuốt Alt+F4 cho đúng target là cửa sổ này
+                win.bind("<Alt-KeyPress-F4>", lambda e, w=win: (self._guarded_close(w), "break"))
+                win.bind("<Alt-F4>",          lambda e, w=win: (self._guarded_close(w), "break"))
 
                 self.roots_extra.append(win)
             except Exception:
@@ -355,10 +359,9 @@ class AppGUI:
 
         self._resolve_COM()
 
-        
-
         self._refresh_gui()
 
+        self.install_close_lock(10)
         # self.root.after(3000, self.send_to_com("?"))
         ### Example usage of slot status update
         # self.update_slot_status(slot_id=1, status="testing")
@@ -521,36 +524,7 @@ class AppGUI:
 
         self.fx_cfg = load_fixture_cfg(app_dir()/"config.ini")
 
-        # -------- helpers: read last-wins slot value in ini (chịu được key trùng như slot8) --------
-        def _ini_get_slot_value(section: str, idx: int, default: str = "") -> str:
-            try:
-                path = Path(self.cfg_path)
-                if not path.exists():
-                    return default
-                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-
-                in_sec = False
-                last = None
-                sec_u = section.strip().upper()
-
-                for ln in lines:
-                    s = ln.strip()
-                    if not s or s.startswith(("#", ";")):
-                        continue
-                    if s.startswith("[") and s.endswith("]"):
-                        in_sec = (s[1:-1].strip().upper() == sec_u)
-                        continue
-                    if not in_sec:
-                        continue
-
-                    if s.lower().startswith(f"slot{idx}".lower()):
-                        parts = s.split("=", 1)
-                        if len(parts) == 2:
-                            last = parts[1].strip()
-                return last if last is not None else default
-            except Exception:
-                return default
-
+        # lấy dữ liệu slot hiện tại
         slot_test = self.fx_cfg.slot_text.get(slot_idx, "")
         slot_cmd0 = self.fx_cfg.slot_command.get(slot_idx, "")
 
@@ -615,7 +589,7 @@ class AppGUI:
 
         # lấy chiều cao entry để spacing “ăn khớp” asset (nếu có)
         entry_img = self.assets.get(normal_k)
-        entry_h   = int(entry_img.height()) if entry_img else 44
+        # entry_h   = int(entry_img.height()) if entry_img else 44
 
         # ===== ROWS (map lại toạ độ) =====
         y_num_line      = y1
@@ -717,17 +691,41 @@ class AppGUI:
             modal.hide()
 
         def _confirm():
+            new_test = (txt_entry.get() or "").strip()
             new_cmd = (cmd_entry.get() or "").strip()
             modal.hide()
 
             # TODO: save ini sau - giờ log để verify GUI
             try:
+                update_ini_manual_slot_info(
+                    self.cfg_path,
+                    slot_idx=slot_idx,
+                    slot_test=new_test,
+                    slot_cmd=new_cmd,
+                    slot_cmd_section="SLOT_COMMAND",  # hoặc "SLOT_CMD" nếu bạn đặt thế
+                )
                 self._update_logs_panel(
-                    f"[manual] slot{slot_idx} SLOT_COMMAND = '{new_cmd}' (TODO: save to ini)",
+                    f"[manual] slot{slot_idx} SLOT_TEST='{new_test}' SLOT_COMMAND='{new_cmd}' (saved)",
                     "yellow",
                 )
-            except Exception:
-                print(f"[manual] slot{slot_idx} SLOT_COMMAND = '{new_cmd}' (TODO: save to ini)")
+            except Exception as e:
+                self._update_logs_panel(f"[manual] save ini failed: {e}", "red")
+            finally:
+                # reload slot text/command
+                self.fx_cfg = load_fixture_cfg(app_dir()/"config.ini")
+                new_test = self.fx_cfg.slot_text.get(slot_idx, "")
+                new_cmd = self.fx_cfg.slot_command.get(slot_idx, "")
+                # cập nhật lại slot test text trên nút: broadcasting
+                for win in self._iter_windows():
+                    slot = self._get_widgets(win).get(f"slot{slot_idx}")
+                    if slot:
+                        slot.set_text(new_test)
+                        self.reload_slot_status()
+
+                    self._update_logs_panel(
+                        f"[manual] slot{slot_idx} reloaded SLOT_TEST='{new_test}' SLOT_COMMAND='{new_cmd}'",
+                        "green",
+                    )
 
         # Confirm: mặc định ẩn, chỉ hiện khi dirty
         btn_confirm = bind_canvas_button(
@@ -774,11 +772,16 @@ class AppGUI:
         cmd_entry.configure(on_submit=_on_submit)
 
         def _apply_dirty():
+            # dirty cmd_entry
             dirty = ((cmd_entry.get() or "") != (slot_cmd0 or ""))
-            _set_btn_visible(btn_confirm, dirty)
-            if dirty:
+            # dirty txt_entry
+            dirty_txt = ((txt_entry.get() or "") != (slot_test) or "")
+
+            _set_btn_visible(btn_confirm, dirty_txt or dirty)
+            
+            if dirty or dirty_txt:
                 _move_btn(btn_cancel, cx + btn_gap // 2, btn_y)
-            else:
+            else: 
                 _move_btn(btn_cancel, cx, btn_y)
 
         # trace thay đổi entry để show/hide confirm
@@ -807,22 +810,6 @@ class AppGUI:
             self.reload_slot_status()
 
         self.root.after(3000, self._refresh_gui)
-
-    ### This is more accurate refresh GUI version with task queue
-    # def _refresh_gui(self):
-    #     try:
-    #         status_map = load_slot_status_from_ini(self.cfg_path)
-    #         self.status_map = status_map
-    #         for slot_id, status in status_map.items():
-    #             for w in self._iter_windows():
-    #                 ws = self._get_widgets(w)
-    #                 slot = ws.get(f"slot{slot_id}")
-    #                 if slot:
-    #                     slot.set_status(status)
-    #     except Exception as e:
-    #         self.emit_log(f"[refresh] error: {e}", "yellow")
-
-    #     self.root.after(3000, self._refresh_gui)
 
     # Resolve COM port
     def _resolve_COM(self):
@@ -1063,6 +1050,9 @@ class AppGUI:
 
     # Close all windows
     def _close_all_windows(self, source_win: tk.Misc | None = None):
+        if self._is_close_locked():
+            self._emit_guard(f"[guard] Close bị chặn. Còn ~{self._remaining_lock():.1f}s")
+            return
         # chống re-entrant (vì destroy root sẽ destroy các toplevel, callback có thể bị gọi chồng)
         if getattr(self, "_is_closing_all", False):
             return
@@ -1090,3 +1080,50 @@ class AppGUI:
         except Exception:
             pass
 
+    def _emit_guard(self, msg: str):
+        try:
+            self._update_logs_panel(msg, "yellow")
+        except Exception:
+            print(msg)
+
+    def install_close_lock(self, seconds: float = 10.0):
+        self._close_lock_until = time.monotonic() + float(seconds)
+
+        # lock cả root
+        self.root.protocol("WM_DELETE_WINDOW", lambda: self._guarded_close(self.root))
+        self.root.bind_all("<Alt-KeyPress-F4>", lambda e: (self._guarded_close(self._focused_window()), "break"), add="+")
+        self.root.bind_all("<Alt-F4>",         lambda e: (self._guarded_close(self._focused_window()), "break"), add="+")
+
+        # mở khóa sau 10s
+        self.root.after(int(seconds * 1000), self._unlock_close_lock)
+
+    def _unlock_close_lock(self):
+        self._close_lock_until = 0.0
+        self._emit_guard("[guard] Hết 10s, có thể tắt bình thường.")
+
+    def _is_close_locked(self) -> bool:
+        return time.monotonic() < getattr(self, "_close_lock_until", 0.0)
+
+    def _remaining_lock(self) -> float:
+        until = getattr(self, "_close_lock_until", 0.0)
+        if until <= 0:
+            return 0.0
+        return max(0.0, until - time.monotonic())
+
+    def _focused_window(self):
+        # window đang focus (root hoặc 1 toplevel)
+        try:
+            w = self.root.focus_get()
+            return (w.winfo_toplevel() if w is not None else self.root)
+        except Exception:
+            return self.root
+
+    def _guarded_close(self, win):
+        if self._is_close_locked():
+            # TODO: Thay thì stalling thời gian chờ
+            # Kiêm tra fixture cần đảm bảo các slot test có trạng thái là pass để có thể tắt được - tích hợp sau. 
+            # Hiện tại chỉ chặn tắt trong 10s đầu
+            self._emit_guard(f"[guard] Chưa thể tắt trong 10s đầu. Còn ~{self._remaining_lock():.1f}s")
+            return
+        # cho phép đóng theo logic bạn đang có
+        self._close_all_windows(win)

@@ -353,6 +353,9 @@ class FixtureCheckSlotTest:
         else:
             self.canvas.itemconfig(self.text_id, fill=self.text_fill)
 
+    def set_text(self, text: str):
+        self.canvas.itemconfig(self.text_id, text=text)
+
     def destroy(self):
         try:
             self.canvas.tag_unbind(self.tag, "<Enter>")

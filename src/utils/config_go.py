@@ -518,3 +518,101 @@ def load_slot_status_from_ini(
             out[idx] = "item"
 
     return out
+
+def update_ini_manual_slot_info(
+    ini_path: Union[str, Path],
+    *,
+    slot_idx: int,
+    slot_test: Optional[str] = None,
+    slot_cmd: Optional[str] = None,
+    slot_test_section: str = "SLOT_TEST",
+    slot_cmd_section: str = "SLOT_COMMAND",
+    slots: int = 12,
+    encoding: str = "utf-8",
+) -> None:
+    """
+    Cập nhật thủ công thông tin slot:
+      - [SLOT_TEST]  slot{idx}=<slot_test>
+      - [SLOT_COMMAND] slot{idx}=<slot_cmd>   (section có thể đổi bằng slot_cmd_section)
+
+    - Text-based: giữ comment/format
+    - Nếu section chưa có -> tự tạo
+    - Nếu slot bị lặp nhiều dòng -> update TẤT CẢ dòng trùng
+    - Nếu chưa có key slot{idx} -> append vào cuối section
+    - Atomic write
+    """
+    if not (1 <= int(slot_idx) <= int(slots)):
+        raise ValueError(f"slot_idx out of range: {slot_idx}")
+
+    path = Path(ini_path)
+
+    if path.exists():
+        raw = path.read_bytes()
+        newline = _detect_newline(raw)
+        lines = raw.decode(encoding, errors="replace").splitlines()
+    else:
+        newline = "\n"
+        lines = []
+
+    def _upsert_slot_value_in_section(
+        lines_in: list[str],
+        section_name: str,
+        idx: int,
+        value: str,
+    ) -> list[str]:
+        """
+        Upsert slot{idx}=value trong section_name.
+        Update tất cả dòng trùng. Nếu chưa có -> append.
+        """
+        start, end = _find_section_bounds(lines_in, section_name)
+
+        # create section if missing
+        if start is None:
+            if lines_in and lines_in[-1].strip() != "":
+                lines_in.append("")
+            lines_in.append(f"[{section_name}]")
+            start = len(lines_in)
+            end = len(lines_in)
+        if end is None:
+            end = len(lines_in)
+
+        target = int(idx)
+        found_any = False
+        new_sec: list[str] = []
+
+        for ln in lines_in[start:end]:
+            m = _SLOT_RE.match(ln)
+            if m:
+                indent, key, num_s, eq, _old, trail = m.groups()
+                try:
+                    num = int(num_s)
+                except ValueError:
+                    new_sec.append(ln)
+                    continue
+
+                if num == target:
+                    # preserve indent/eq/trailing spaces
+                    new_sec.append(f"{indent}{key}{num}{eq}{value}{trail}")
+                    found_any = True
+                    continue
+
+            new_sec.append(ln)
+
+        if not found_any:
+            if new_sec and new_sec[-1].strip() != "":
+                new_sec.append("")
+            new_sec.append(f"slot{target}={value}")
+
+        return lines_in[:start] + new_sec + lines_in[end:]
+
+    # normalize values (allow empty string)
+    if slot_test is not None:
+        v = (slot_test or "").strip()
+        lines = _upsert_slot_value_in_section(lines, slot_test_section, slot_idx, v)
+
+    if slot_cmd is not None:
+        v = (slot_cmd or "").strip()
+        lines = _upsert_slot_value_in_section(lines, slot_cmd_section, slot_idx, v)
+
+    out_text = newline.join(lines) + newline
+    _atomic_write_text(path, out_text, encoding=encoding)

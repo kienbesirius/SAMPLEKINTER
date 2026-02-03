@@ -4,8 +4,8 @@ from src.gui import gui204_count_primes
 from src.gui import gui279_perfect_squares
 from src.gui import gui_check_fixture
 from src.gui import gui_bypass
-
-
+from src.utils.exit_guard import ExitGuard
+    
 def main_gui():
 	root = tk.Tk()  
 	# app = gui204_count_primes.LeetCode204_Gui(root)
