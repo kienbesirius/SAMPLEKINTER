@@ -15,27 +15,27 @@ class LogPanelSkins:
 
 def _pick_scaled_key(canvas: tk.Canvas, assets: Dict[str, Any], base_key: str) -> str:
     """Chọn key _0.5/_0.75 nếu tồn tại trong assets, giống các widget trước."""
-    if base_key.endswith("_0.5") or base_key.endswith("_0.75"):
-        return base_key
+    # if base_key.endswith("_0.5") or base_key.endswith("_0.75"):
+    #     return base_key
 
-    try:
-        w = int(canvas.winfo_width())
-    except Exception:
-        w = 0
+    # try:
+    #     w = int(canvas.winfo_width())
+    # except Exception:
+    #     w = 0
 
-    # nếu canvas chưa ready -> ưu tiên 0.75 (đỡ bé quá)
-    if w <= 1:
-        k = f"{base_key}_0.75"
-        return k if k in assets else base_key
+    # # nếu canvas chưa ready -> ưu tiên 0.75 (đỡ bé quá)
+    # if w <= 1:
+    #     k = f"{base_key}_0.75"
+    #     return k if k in assets else base_key
 
-    if w <= 800:
-        k = f"{base_key}_0.5"
-        if k in assets:
-            return k
-    if w <= 1200:
-        k = f"{base_key}_0.75"
-        if k in assets:
-            return k
+    # if w <= 800:
+    #     k = f"{base_key}_0.5"
+    #     if k in assets:
+    #         return k
+    # if w <= 1200:
+    #     k = f"{base_key}_0.75"
+    #     if k in assets:
+    #         return k
 
     return base_key
 
@@ -138,7 +138,7 @@ class CanvasLogWidget:
         # background
         self._bg_base = self.skins.bg
         self._bg_key = _pick_scaled_key(self.canvas, self.assets, self._bg_base)
-
+        
         self.bg_id = self.canvas.create_image(
             x, y,
             image=self.assets[self._bg_key],

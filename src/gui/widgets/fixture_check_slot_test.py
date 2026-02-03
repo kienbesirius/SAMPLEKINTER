@@ -347,6 +347,7 @@ class FixtureCheckSlotTest:
         self._status = status
 
         key = self._status_to_key(status)
+        
         self.canvas.itemconfig(self.img_id, image=self.assets[key])
 
         # text color depends on disabled
@@ -590,8 +591,8 @@ def bind_fixture_check_slot_test(
     # Get canvas width to pick scaled assets
     if "fixture" in idle_status:
         # Get canvas height width to define button skins
-        canvas_width = canvas.winfo_width()
-        if canvas_width <= 800:
+        # canvas_width = canvas.winfo_width()
+        # if canvas_width <= 800:
             idle_status += "_0.5"
             testing_status += "_0.5"
             pass_status += "_0.5"
@@ -600,14 +601,14 @@ def bind_fixture_check_slot_test(
             item_status += "_0.5" # "item"
             unknown_status += "_0.5" # "idle"
 
-        elif canvas_width <= 1200:
-            idle_status += "_0.75"
-            testing_status += "_0.75"
-            pass_status += "_0.75"
-            fail_status += "_0.75"
-            stand_by_status += "_0.75" # "item"
-            item_status += "_0.75" # "item"
-            unknown_status += "_0.75" # "idle"
+        # elif canvas_width <= 1200:
+        #     idle_status += "_0.75"
+        #     testing_status += "_0.75"
+        #     pass_status += "_0.75"
+        #     fail_status += "_0.75"
+        #     stand_by_status += "_0.75" # "item"
+        #     item_status += "_0.75" # "item"
+        #     unknown_status += "_0.75" # "idle"
 
     # Build skins
     skins = SlotTestSkins(

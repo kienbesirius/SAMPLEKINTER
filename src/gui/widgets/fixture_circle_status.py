@@ -67,12 +67,16 @@ def _scale_suffix_from_canvas(canvas: tk.Canvas) -> Optional[str]:
 
     # nếu winfo_width chưa “ready” (hay gặp lúc init), fallback về 0.75
     if w <= 1:
+        print(0.75)
         return "_0.75"
 
     if w <= 800:
+        print(0.5)
         return "_0.5"
     if w <= 1200:
+        print(0.75)
         return "_0.75"
+
     return None
 
 
@@ -126,6 +130,7 @@ def _find_fixture_text_com_key(assets: Dict[str, Any], canvas: tk.Canvas, label:
 
     for k in candidates:
         if k in assets:
+            print(k)
             return k
     return None
 
@@ -368,7 +373,7 @@ class FixtureComStatus:
         # Try image label first
         k = _find_fixture_text_com_key(self.assets, self.canvas, self._label)
         self._label_img_key = k
-
+        
         if k is not None:
             self.canvas.itemconfig(self.label_img_id, image=self.assets[k], state="normal")
             self.canvas.itemconfig(self.label_text_id, state="hidden", text="")
@@ -462,7 +467,6 @@ class FixtureComStatus:
         """
         k = _find_fixture_text_com_key(self.assets, self.canvas, self._label)
         self._label_img_key = k
-
         if k is not None:
             self.canvas.itemconfig(self.label_img_id, image=self.assets[k], state="normal")
             self.canvas.itemconfig(self.label_text_id, state="hidden", text="")

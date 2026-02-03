@@ -21,6 +21,7 @@ from src.gui.widgets.fixture_check_slot_test import bind_fixture_check_slot_test
 from src.gui.widgets.fixture_circle_status import bind_fixture_circle_com_status
 from src.gui.widgets.paint_asset import bind_canvas_asset
 from src.gui.widgets.canvas_log_widget import bind_canvas_log_widget
+from src.gui.widgets.rect_panel import bind_center_rect_panel, CenterRectStyle
 from src.gui.fixture.fill_multiple_monitor import fullscreen_on_monitor, get_monitors, monitor_from_point
 from src.gui.fixture.get_fixture_port import get_fixture_port, parse_fixture_port_text
 from src.gui.fixture.get_serial_list import get_serial_ports
@@ -422,29 +423,33 @@ class AppGUI:
 
             widgets[f"slot{i}"] = slot
 
-        # Paint arrow
-        x += slot_gap*2
-        y -= slot_gap
-        arrow = bind_canvas_asset(
-            root=win,
-            canvas=canvas,
-            assets=self.assets,
-            tag="arrow_indicator",
-            x=x, y=y,
-            anchor="center",
-            right_key="fixture_arrow_to_right",
-            state="normal",
-        )
+        # # Paint arrow
+        # x += slot_gap*2
+        # y -= slot_gap
+        # arrow = bind_canvas_asset(
+        #     root=win,
+        #     canvas=canvas,
+        #     assets=self.assets,
+        #     tag="arrow_indicator",
+        #     x=x, y=y,
+        #     anchor="center",
+        #     right_key="fixture_arrow_to_right",
+        #     state="normal",
+        # )
 
-        widgets[f"arrow"] = arrow
+        # widgets[f"arrow"] = arrow
 
-        x += slot_gap*1.5 + self.assets["fixture_info_frame_bg"].width() / 2
+        # x += slot_gap*1.5 + self.assets["fixture_info_frame_bg"].width() / 2
+
+        # Setup at bottom right of the win
+        bottom_x = sw - (self.assets["fixture_info_frame_bg"].width() // 2) - 8
+        bottom_y = sh - (self.assets["fixture_info_frame_bg"].height() // 2) - 8
         logs = bind_canvas_log_widget(
             root=win,
             canvas=canvas,
             assets=self.assets,
             tag="logs_panel",
-            x=x, y=y,
+            x=bottom_x, y=bottom_y,
             bg_key="fixture_info_frame_bg",
             anchor="center",
             ui_max_lines=100,
@@ -469,9 +474,36 @@ class AppGUI:
         # widgets["send_test_cmd_button"] = send_test_cmd_btn
         #### BUTTON CHECK OKAY!!!
         
+
+
+        avoid = ["com_status", "logs_panel"] + [f"slot{i}_status" for i in range(1, 13)]
+
+        center_panel = bind_center_rect_panel(
+            root=win,
+            canvas=canvas,
+            tag="center_panel",
+            avoid=avoid,
+            style=CenterRectStyle(
+                outline="#FFB14A",
+                width=3,
+                fill="#471800",          # hoặc "#000000" + stipple="gray25" nếu muốn kiểu mờ
+                stipple="",
+                inner_pad=16,
+            ),
+            pad_screen=18,
+            pad_avoid=16,
+            min_size=(520, 320),
+            keep_ratio=None,     # hoặc 16/9 nếu muốn khung “đẹp” theo tỉ lệ
+        )
+
+        center_panel.set_title("HƯỚNG DẪN KIỂM TRA FIXTURE")
+        widgets["center_panel"] = center_panel
+
         # Dialog must be always last to create 
         modal = ModalOverlay(win)
         widgets["modal"] = modal
+
+
 
         return widgets
     
