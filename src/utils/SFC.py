@@ -2,6 +2,7 @@ from __future__ import annotations
 import configparser
 import re
 import socket
+import os
 from src.utils.resource_path import app_dir
 
 CONFIG_PATH = app_dir() / "config.ini"
@@ -68,24 +69,88 @@ def _get_primary_via_udp() -> Optional[str]:
 
 import subprocess
 import platform
+from typing import List, Dict, Any, Optional
+
+def _no_console_subprocess_kwargs() -> Dict[str, Any]:
+    """
+    Windows: không bật console window (không popup terminal).
+    Linux/macOS: trả về rỗng.
+    """
+    if os.name != "nt":
+        return {}
+
+    creationflags = 0
+    startupinfo = None
+
+    # Ẩn hoàn toàn console window của child process
+    creationflags |= subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+
+    # (optional) thêm STARTUPINFO cho chắc
+    startupinfo = subprocess.STARTUPINFO()        # type: ignore[attr-defined]
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW  # type: ignore[attr-defined]
+
+    return {"creationflags": creationflags, "startupinfo": startupinfo}
+
+# def _get_by_cli() -> List[str]:
+#     out = ""
+#     ips = []
+#     try:
+#         system = platform.system().lower()
+#         if system == "windows":
+#             p = subprocess.run(["ipconfig"], capture_output=True, text=True, timeout=2)
+#             out = p.stdout
+#         else:
+#             try:
+#                 p = subprocess.run(["ip", "addr"], capture_output=True, text=True, timeout=2)
+#                 out = p.stdout
+#             except Exception:
+#                 p = subprocess.run(["ifconfig"], capture_output=True, text=True, timeout=2)
+#                 out = p.stdout
+#     except Exception:
+#         return ips
+
 def _get_by_cli() -> List[str]:
     out = ""
-    ips = []
+    ips: List[str] = []
+
+    kw = _no_console_subprocess_kwargs()
+
     try:
         system = platform.system().lower()
         if system == "windows":
-            p = subprocess.run(["ipconfig"], capture_output=True, text=True, timeout=2)
-            out = p.stdout
+            p = subprocess.run(
+                ["ipconfig"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                shell=False,
+                **kw,
+            )
+            out = p.stdout or ""
         else:
             try:
-                p = subprocess.run(["ip", "addr"], capture_output=True, text=True, timeout=2)
-                out = p.stdout
+                p = subprocess.run(
+                    ["ip", "addr"],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                    shell=False,
+                    **kw,   # harmless trên linux (kw = {})
+                )
+                out = p.stdout or ""
             except Exception:
-                p = subprocess.run(["ifconfig"], capture_output=True, text=True, timeout=2)
-                out = p.stdout
+                p = subprocess.run(
+                    ["ifconfig"],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                    shell=False,
+                    **kw,
+                )
+                out = p.stdout or ""
     except Exception:
         return ips
-
+    
     for m in re.finditer(r"(?:inet\s|IPv4 Address[.\s]*:\s*)(\d{1,3}(?:\.\d{1,3}){3})", out):
         ip = m.group(1)
         if ip and not ip.startswith("127."):
