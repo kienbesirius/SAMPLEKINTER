@@ -41,6 +41,11 @@ FONT_ASSET = {
 
 ASSET_FILES = {
     # Fixture design
+    "fixture_sensor_top_right_guide_240x240": RESOURCE_PATH / "fixture" / "fixture_sensor_top_right_guide_240x240.png",
+    "fixture_sensor_top_left_guide_240x240": RESOURCE_PATH / "fixture" / "fixture_sensor_top_left_guide_240x240.png",
+    "fixture_sensor_bottom_left_guide_240x240": RESOURCE_PATH / "fixture" / "fixture_sensor_bottom_left_guide_240x240.png",
+    "fixture_sensor_bottom_right_guide_240x240": RESOURCE_PATH / "fixture" / "fixture_sensor_bottom_right_guide_240x240.png",
+
     "fixture_sensor_in_guide_240x240": RESOURCE_PATH / "fixture" / "fixture_sensor_in_guide_240x240.png",
     "fixture_close_guide_240x240": RESOURCE_PATH / "fixture" / "fixture_close_guide_240x240.png",
     "fixture_stop_guide_240x240": RESOURCE_PATH / "fixture" / "fixture_stop_guide_240x240.png",

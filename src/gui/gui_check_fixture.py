@@ -4,6 +4,7 @@ import re
 import sys
 import time
 import threading
+import math
 import tkinter as tk
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -366,6 +367,15 @@ class AppGUI:
         self._refresh_gui()
 
         self.install_close_lock(10)
+
+        self.map_fixture = {
+            "block_sensor_top_left": "fixture_sensor_top_left_guide_240x240",
+            "block_sensor_top_right": "fixture_sensor_top_right_guide_240x240",
+            "block_sensor_bottom_left": "fixture_sensor_bottom_left_guide_240x240",
+            "block_sensor_bottom_right": "fixture_sensor_bottom_right_guide_240x240",
+            "force_stop": "fixture_stop_guide_240x240",
+        }
+
         # self.root.after(3000, self.send_to_com("?"))
         ### Example usage of slot status update
         # self.update_slot_status(slot_id=1, status="testing")
@@ -544,6 +554,11 @@ class AppGUI:
 
         return widgets
     
+    def _flow_gui(self):
+        pass
+
+    def _draw_guide(self, canvas: tk.Canvas):
+        pass 
 
     def show_reset_confirm(self, win: tk.Misc | None = None):
         win = win or self.root
