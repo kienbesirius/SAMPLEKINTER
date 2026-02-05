@@ -320,22 +320,6 @@ try:
 except Exception:
     errorlog, infolog, debuglog = "[ERROR]", "[INFO]", "[DEBUG]"
 
-def _resolve_base_dir(path_log: os.PathLike | str | None) -> Path:
-    """Xác định thư mục gốc chứa file .py/.pyc/.exe đang chạy."""
-    if path_log:
-        return Path(path_log).expanduser().resolve()
-
-    # PyInstaller / đóng gói: ưu tiên thư mục của executable
-    if getattr(sys, "frozen", False) and hasattr(sys, "executable"):
-        return Path(sys.executable).resolve().parent
-
-    # Module/Script thông thường
-    try:
-        return Path(__file__).resolve().parent
-    except NameError:
-        argv0 = Path(sys.argv[0]).resolve() if sys.argv and sys.argv[0] else Path.cwd()
-        return argv0.parent if argv0.is_file() else argv0
-
 def _now(tz: str | object | None) -> datetime:
     """Trả về datetime hiện tại theo tz (chuỗi zone, tzinfo, hoặc None)."""
     if tz is None:
@@ -379,7 +363,10 @@ def write_log(
     if log_text is None:
         return None
 
-    base_dir = _resolve_base_dir(path_log)
+    if path_log is None:
+        base_dir = app_dir()
+    else:
+        base_dir = path_log 
     now = _now(tz)
 
     logs_dir = base_dir / "LOGS" / now.strftime("%Y%m")
@@ -488,6 +475,7 @@ def Post(lineName, groupName, sp, requestBody):  # Post data to SFC
 # Get specific Station
 def sendDataAPI(requestBody):
     """Gửi chuỗi requestBody lên SFC theo cấu hình SMO và in kết quả ra stdout."""
+    global TEST_GROUP
     try:
         _log(f"bypass [ ] start. body='{requestBody}'", "DEBUG")
 
@@ -509,6 +497,7 @@ def sendDataAPI(requestBody):
         
         line_name = dataSMO["LINE_NAME"]
         group_name = dataSMO["GROUP_NAME"]
+        TEST_GROUP = dataSMO["GROUP_NAME"]  # Cập nhật TEST_GROUP từ cấu hình SMO
         sp = dataSMO["SP"]
 
         _log(f"SMO Config -> LINE='{line_name}', GROUP='{group_name}', SP='{sp}'", "DEBUG")
