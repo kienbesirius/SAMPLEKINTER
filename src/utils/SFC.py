@@ -500,7 +500,7 @@ def sendDataAPI(requestBody):
 
         SMOConfig = resGet
         # get SMOConfig with GROUP_NAME=VI3
-        dataSMO = next((item for item in SMOConfig["Data"] if item["GROUP_NAME"] == TEST_GROUP), None)
+        dataSMO = next((item for item in SMOConfig["Data"] if item["GROUP_NAME"] == "VI4" or item["GROUP_NAME"] == "VI3" or item["GROUP_NAME"] == "VI2" or item["GROUP_NAME"] == "VI1"), None)
         if dataSMO is None:
             msg = "FAIL|This GROUP_NAME=VI3 haven't config in SFC yet!"
             print(msg)

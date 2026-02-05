@@ -258,7 +258,7 @@ class AppGUI:
         self.runner = sub_thread.SubProcessRunner(self.root)
 
         # Window setup
-        self.root.title("GUI ByPASS: Warning Usage")
+        self.root.title("BypassSampleKinterApp")
         self.root.geometry(f"{W}x{H}")
         self.root.resizable(False, False)
 
