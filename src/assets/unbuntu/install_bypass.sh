@@ -8,12 +8,14 @@ BIN_NAME="BypassSampleKinterApp"         # tên file chạy sau khi đóng gói 
 ICON_NAME="${APP_ID}.svg"
 
 # ---- Input ----
-# Dùng: ./install_bypass_app.sh BypassSampleKinterApp treasure-svgrepo-com.svg
+# Dùng: ./install_bypass_app.sh BypassSampleKinterApp treasure-svgrepo-com.svg config.ini
+
 SRC_BIN="${1:-}"
 SRC_ICON="${2:-}"
-
+SRC_CONFIG="${3:-}"
+# ---------------
 if [[ -z "${SRC_BIN}" ]]; then
-  echo "Usage: $0 /path/to/${BIN_NAME} [optional_icon.png]"
+  echo "Usage: $0 /path/to/${BIN_NAME} [optional_icon.png] [optional_config.ini]"
   exit 1
 fi
 
@@ -27,6 +29,7 @@ if [[ ! -x "${SRC_BIN}" ]]; then
   exit 1
 fi
 
+
 # Detect user (when running with sudo)
 REAL_USER="${SUDO_USER:-$USER}"
 REAL_HOME="$(getent passwd "${REAL_USER}" | cut -d: -f6)"
@@ -38,6 +41,7 @@ DESKTOP_FILE="${USER_APPS_DIR}/${APP_ID}.desktop"
 DESKTOP_SHORTCUT="${DESKTOP_DIR}/${APP_NAME}.desktop"
 TARGET_BIN="${INSTALL_DIR}/${BIN_NAME}"
 TARGET_ICON="${USER_ICONS_DIR}/${ICON_NAME}"
+TARGET_CONFIG="${INSTALL_DIR}/config.ini"
 
 echo "==> Installing ${APP_NAME}"
 echo "    User: ${REAL_USER}"
@@ -48,6 +52,15 @@ echo "    Source binary: ${SRC_BIN}"
 echo "==> Copying binary to ${INSTALL_DIR}"
 sudo mkdir -p "${INSTALL_DIR}"
 sudo install -m 0755 "${SRC_BIN}" "${TARGET_BIN}"
+# If config file provided, copy it too
+if [[ -n "${SRC_CONFIG}" ]]; then
+  if [[ ! -f "${SRC_CONFIG}" ]]; then
+    echo "ERROR: config file not found: ${SRC_CONFIG}"
+    exit 1
+  fi
+  echo "==> Installing config file from ${SRC_CONFIG}"
+  sudo install -m 0644 "${SRC_CONFIG}" "${TARGET_CONFIG}"
+fi
 
 # ---- 2) Install icon ----
 sudo -u "${REAL_USER}" mkdir -p "${USER_ICONS_DIR}"
@@ -172,3 +185,7 @@ echo "✅ Done."
 echo "App installed to: ${TARGET_BIN}"
 echo "Launcher: ${DESKTOP_FILE}"
 echo "Desktop shortcut: ${DESKTOP_SHORTCUT}"
+
+sudo mkdir -p "${INSTALL_DIR}/LOGS"
+sudo chown -R "${REAL_USER}:${REAL_USER}" "${INSTALL_DIR}/LOGS"
+sudo chmod 775 "${INSTALL_DIR}/LOGS"
