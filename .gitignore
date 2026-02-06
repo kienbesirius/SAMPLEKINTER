@@ -29,6 +29,11 @@ pip-wheel-metadata/
 !win-py310/Lib/site-packages/pip/_internal/operations/build/
 !win-py310/Lib/site-packages/pip/_internal/operations/build/**
 
+# unignore pip internal build folder (đúng path trong repo của bạn)
+!python-3.10.11-embed-win32/Lib/site-packages/pip/_internal/operations/build/
+!python-3.10.11-embed-win32/Lib/site-packages/pip/_internal/operations/build/**
+
+
 # PyInstaller
 *.spec
 
