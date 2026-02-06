@@ -23,6 +23,7 @@ from src.gui.widgets.text import bind_canvas_text
 from src.gui.widgets.fixture_check_slot_test import bind_fixture_check_slot_test
 from src.gui.widgets.fixture_circle_status import bind_fixture_circle_com_status
 from src.gui.widgets.paint_asset import bind_canvas_asset
+from src.gui.widgets.guide_panel import GuidePanel, GuideStep
 from src.gui.widgets.canvas_log_widget import bind_canvas_log_widget
 from src.gui.widgets.rect_panel import bind_center_rect_panel, CenterRectStyle
 from src.gui.fixture.fill_multiple_monitor import fullscreen_on_monitor, get_monitors, monitor_from_point
@@ -548,6 +549,42 @@ class AppGUI:
         center_panel.set_title("HƯỚNG DẪN KIỂM TRA FIXTURE")
         widgets["center_panel"] = center_panel
 
+
+        def _guide_done():
+            # Step cuối xong thì bạn làm gì tuỳ ý:
+            # ví dụ: bật lại nút start / cho phép click slot / v.v...
+            print("Guide done!")
+
+        guide = GuidePanel(
+            root=win,
+            center_panel=center_panel,
+            assets=self.assets,
+            tag="fixture_guide",
+            on_done=_guide_done,
+            auto_hide_on_done=False,
+        )
+
+        guide.set_steps([
+            GuideStep(
+                title="Xin thực hiện ĐÓNG FIXTURE (IN CLOSE).",
+                image_key="guide_close_fixture",   # assets phải có key này (và có thể có _0.5/_0.75)
+                confirm_text="",
+            ),
+            GuideStep(
+                title="Xin thực hiện MỞ FIXTURE (OUT OPEN).",
+                image_key="guide_open_fixture",
+                confirm_text="",
+            ),
+            GuideStep(
+                title="Hoàn tất. Bấm xác nhận để bắt đầu test.",
+                image_key="guide_done",
+                confirm_text="",
+            ),
+        ])
+
+        guide.start()
+
+        widgets["guide"] = guide
         # Dialog must be always last to create 
         modal = ModalOverlay(win)
         widgets["modal"] = modal

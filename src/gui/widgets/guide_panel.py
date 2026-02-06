@@ -1,0 +1,370 @@
+# src/gui/widgets/guide_panel.py
+from __future__ import annotations
+
+import tkinter as tk
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional, Sequence
+
+from .button import bind_canvas_button
+from .paint_asset import bind_canvas_asset
+
+
+@dataclass
+class GuideStep:
+    title: str                      # ví dụ: "Xin thực hiện đóng fixture..."
+    image_key: str                  # key ảnh trong assets (base key)
+    confirm_text: str = ""  # text trên button (có thể để "" nếu button asset đã có chữ)
+    # bạn có thể mở rộng thêm: hint_text, auto_delay, v.v...
+
+
+class GuidePanel:
+    """
+    A fixed-layout panel inside center_panel.body:
+      [Title]
+      [Big Image]
+      [Confirm Button]
+
+    Only updates content on each step (no rebuild).
+    """
+
+    def __init__(
+        self,
+        *,
+        root: tk.Misc,
+        center_panel: Any,                 # object returned by bind_center_rect_panel
+        assets: Dict[str, Any],
+        tag: str = "guide_panel",
+        title_font: Any = ("Tektur", 16, "bold"),
+        title_fill: str = "#FFE37A",
+        bg: Optional[str] = None,
+        img_max_ratio: float = 0.55,       # image area <= 55% height of panel body
+        img_min_h: int = 120,
+        btn_pad_y: int = 10,
+        auto_hide_on_done: bool = True,
+        on_done: Optional[Callable[[], None]] = None,
+    ) -> None:
+        self.root = root
+        self.center_panel = center_panel
+        self.assets = assets
+        self.tag = tag
+
+        self.img_max_ratio = float(img_max_ratio)
+        self.img_min_h = int(img_min_h)
+        self.btn_pad_y = int(btn_pad_y)
+        self.auto_hide_on_done = bool(auto_hide_on_done)
+        self.on_done = on_done
+
+        # panel background color
+        if bg is None:
+            # try to reuse style.fill if exists
+            bg = getattr(getattr(center_panel, "style", None), "fill", None) or "#471800"
+        self.bg = bg
+
+        # --- state ---
+        self.steps: List[GuideStep] = []
+        self.idx: int = 0
+
+        # --- build fixed layout once ---
+        self.frame = tk.Frame(self.center_panel.body, bg=self.bg)
+        self.frame.pack(fill="both", expand=True)
+
+        # Title
+        self.title_var = tk.StringVar(value="")
+        self.lb_title = tk.Label(
+            self.frame,
+            textvariable=self.title_var,
+            font=title_font,
+            fg=title_fill,
+            bg=self.bg,
+            justify="center",
+            wraplength=10,   # will update on resize
+        )
+        self.lb_title.grid(row=0, column=0, sticky="ew", padx=12, pady=(10, 6))
+
+        # Image canvas (use bind_canvas_asset here)
+        self.cv_img = tk.Canvas(self.frame, bg=self.bg, highlightthickness=0, bd=0)
+        self.cv_img.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 6))
+
+        # Placeholder when missing image
+        self._img_placeholder_id = self.cv_img.create_text(
+            0, 0,
+            text="(no image)",
+            fill="#FFFFFF",
+            font=("Tektur", 12, "bold"),
+            anchor="center",
+        )
+
+        self._img_widget = None  # created lazily when we have a valid key
+
+        # Button canvas
+        self.cv_btn = tk.Canvas(self.frame, bg=self.bg, highlightthickness=0, bd=0, height=92)
+        self.cv_btn.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 10))
+
+        self.frame.grid_columnconfigure(0, weight=1)
+        self.frame.grid_rowconfigure(1, weight=1)
+
+        # pick button skins safely
+        def _pick_btn_key(*keys: str, fallback: str) -> str:
+            for k in keys:
+                if k and k in self.assets:
+                    return k
+            return fallback if fallback in self.assets else (keys[0] if keys else fallback)
+
+        self._btn = bind_canvas_button(
+            root=self.frame,
+            canvas=self.cv_btn,
+            assets=self.assets,
+            tag=f"{self.tag}__confirm",
+            x=10, y=10,  # will layout later
+            normal_status=_pick_btn_key("fixture_button_confirm_normal", "button_normal", fallback="button_normal"),
+            hover_status=_pick_btn_key("fixture_button_confirm_hover", "button_hover", fallback="button_hover"),
+            active_status=_pick_btn_key(
+                "fixture_button_confirm_pressed", "fixture_button_confirm_active", "button_active",
+                fallback="button_active",
+            ),
+            disabled_status=_pick_btn_key("fixture_button_confirm_disabled", "button_disabled", fallback="button_disabled"),
+            text="",  # will set per-step
+            text_font=("Tektur", 13, "bold"),
+            command=self.next,
+            cooldown_ms=500,
+        )
+
+        # resize bindings
+        self.frame.bind("<Configure>", self._on_resize, add="+")
+        self.cv_img.bind("<Configure>", self._on_img_resize, add="+")
+        self.cv_btn.bind("<Configure>", self._on_btn_resize, add="+")
+
+    # ----------------------------
+    # Public APIs
+    # ----------------------------
+    def set_steps(self, steps: Sequence[GuideStep], *, start_index: int = 0) -> None:
+        self.steps = list(steps)
+        self.idx = max(0, min(int(start_index), max(0, len(self.steps) - 1)))
+        self._apply_step()
+
+    def start(self) -> None:
+        self.show()
+        self._apply_step()
+
+    def show(self) -> None:
+        # delegate if center_panel has show/hide
+        if hasattr(self.center_panel, "show"):
+            try:
+                self.center_panel.show()
+            except Exception:
+                pass
+        self.frame.lift()
+
+    def hide(self) -> None:
+        if hasattr(self.center_panel, "hide"):
+            try:
+                self.center_panel.hide()
+            except Exception:
+                pass
+
+    def goto(self, index: int) -> None:
+        if not self.steps:
+            return
+        self.idx = max(0, min(int(index), len(self.steps) - 1))
+        self._apply_step()
+
+    def next(self) -> None:
+        if not self.steps:
+            return
+        if self.idx >= len(self.steps) - 1:
+            # DONE
+            if callable(self.on_done):
+                try:
+                    self.on_done()
+                except Exception:
+                    pass
+            if self.auto_hide_on_done:
+                self.hide()
+            return
+
+        self.idx += 1
+        self._apply_step()
+
+    # ----------------------------
+    # Internals
+    # ----------------------------
+    def _pick_existing_asset_key(self, base_key: str, canvas_w: int) -> str:
+        """
+        assets naming convention:
+          base_key, base_key_0.75, base_key_0.5
+
+        IMPORTANT: bind_canvas_asset internally might fallback to base_key,
+        so we ensure the chosen key truly exists (prefer scaled key).
+        """
+        if not base_key:
+            return ""
+
+        # prefer by current width (same logic style as your _pick_scaled_key)
+        if canvas_w <= 800:
+            k = f"{base_key}_0.5"
+            if k in self.assets:
+                return k
+        if canvas_w <= 1200:
+            k = f"{base_key}_0.75"
+            if k in self.assets:
+                return k
+
+        # fallback
+        if base_key in self.assets:
+            return base_key
+        if f"{base_key}_0.75" in self.assets:
+            return f"{base_key}_0.75"
+        if f"{base_key}_0.5" in self.assets:
+            return f"{base_key}_0.5"
+        return ""
+
+    def _btn_move_to_center(self) -> None:
+        # move button by directly moving its canvas items (safe even if btn has no move_to)
+        try:
+            w = int(self.cv_btn.winfo_width())
+            h = int(self.cv_btn.winfo_height())
+        except Exception:
+            return
+        cx, cy = w // 2, h // 2
+        try:
+            # most of your widgets expose img_id + text_id
+            self.cv_btn.coords(self._btn.img_id, cx, cy)
+            self.cv_btn.coords(self._btn.text_id, cx, cy)
+        except Exception:
+            pass
+
+    def _btn_set_text(self, s: str) -> None:
+        # try widget configure first
+        try:
+            self._btn.configure(text=s)
+            return
+        except Exception:
+            pass
+        # fallback: direct canvas
+        try:
+            self.cv_btn.itemconfig(self._btn.text_id, text=s)
+        except Exception:
+            pass
+
+    def _apply_step(self) -> None:
+        if not self.steps:
+            self.title_var.set("")
+            self._btn_set_text("")
+            self._show_missing_image("(no steps)")
+            return
+
+        st = self.steps[self.idx]
+        self.title_var.set(st.title or "Xin thực hiện ...")
+        self._btn_set_text(st.confirm_text)
+
+        # ensure layout sizes already updated
+        self._on_resize()
+
+        # update image
+        self._update_image(st.image_key)
+
+        # move button center (after text update too)
+        self.root.after(0, self._btn_move_to_center)
+
+    def _show_missing_image(self, msg: str) -> None:
+        try:
+            w = int(self.cv_img.winfo_width())
+            h = int(self.cv_img.winfo_height())
+        except Exception:
+            w, h = 0, 0
+
+        self.cv_img.coords(self._img_placeholder_id, max(1, w // 2), max(1, h // 2))
+        self.cv_img.itemconfig(self._img_placeholder_id, text=msg, state="normal")
+
+        if self._img_widget is not None:
+            try:
+                self._img_widget.set_visible(False)
+            except Exception:
+                pass
+
+    def _update_image(self, base_key: str) -> None:
+        try:
+            w = int(self.cv_img.winfo_width())
+            h = int(self.cv_img.winfo_height())
+        except Exception:
+            w, h = 0, 0
+
+        key = self._pick_existing_asset_key(base_key, w)
+        if not key:
+            self._show_missing_image(f"(missing asset: {base_key})")
+            return
+
+        # hide placeholder
+        self.cv_img.itemconfig(self._img_placeholder_id, state="hidden")
+
+        cx, cy = max(1, w // 2), max(1, h // 2)
+
+        if self._img_widget is None:
+            # create lazily (must pass an existing key!)
+            self._img_widget = bind_canvas_asset(
+                root=self.frame,
+                canvas=self.cv_img,
+                assets=self.assets,
+                tag=f"{self.tag}__img",
+                x=cx, y=cy,
+                anchor="center",
+                right_key=key,  # can be any image key, not only arrow
+                state="normal",
+            )
+        else:
+            try:
+                self._img_widget.configure(x=cx, y=cy, key=key, state="normal")
+                self._img_widget.set_visible(True)
+            except Exception:
+                pass
+
+    def _on_resize(self, _ev: Any = None) -> None:
+        # wrap title nicely
+        try:
+            w = int(self.frame.winfo_width())
+            h = int(self.frame.winfo_height())
+        except Exception:
+            return
+
+        self.lb_title.configure(wraplength=max(10, w - 24))
+
+        # limit image area height
+        # compute desired img height cap by ratio
+        img_h = max(self.img_min_h, int(h * self.img_max_ratio))
+        # keep button area visible
+        # (button canvas already has its own height)
+        try:
+            self.cv_img.configure(height=img_h)
+        except Exception:
+            pass
+
+        # also center placeholder text
+        self._on_img_resize()
+        self._on_btn_resize()
+
+    def _on_img_resize(self, _ev: Any = None) -> None:
+        # keep placeholder centered, and image centered
+        try:
+            w = int(self.cv_img.winfo_width())
+            h = int(self.cv_img.winfo_height())
+        except Exception:
+            return
+
+        cx, cy = max(1, w // 2), max(1, h // 2)
+        try:
+            self.cv_img.coords(self._img_placeholder_id, cx, cy)
+        except Exception:
+            pass
+
+        if self._img_widget is not None and self.steps:
+            # re-pick scaled key when canvas width changes
+            base = self.steps[self.idx].image_key
+            key = self._pick_existing_asset_key(base, w)
+            if key:
+                try:
+                    self._img_widget.configure(x=cx, y=cy, key=key)
+                except Exception:
+                    pass
+
+    def _on_btn_resize(self, _ev: Any = None) -> None:
+        self._btn_move_to_center()
