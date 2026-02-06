@@ -127,17 +127,17 @@ def choose_slot_font(label: str) -> Tuple[str, int, str]:
     # find max len in words
     max_len = max(len(w) for w in words)
     if max_len == 4:
-        return ("Tektur", 12, "bold")
+        return ("Tektur", 10, "bold")
     if max_len == 5:
-        return ("Tektur", 11, "bold")
-    if max_len == 6:
         return ("Tektur", 9, "bold")
-    if max_len == 7:
-        return ("Tektur", 8, "bold")
-    if max_len == 8:
+    if max_len == 6:
         return ("Tektur", 7, "bold")
+    if max_len == 7:
+        return ("Tektur", 6, "bold")
+    if max_len == 8:
+        return ("Tektur", 5, "bold")
     if max_len <= 3:
-        return ("Tektur", 14, "bold")
+        return ("Tektur", 12, "bold")
     return ("Tektur", 11, "bold")         # FORCE STOP
 
 _SLOT_RE = re.compile(r"^(\s*)(slot)(\d+)(\s*=\s*)(.*?)(\s*)$", re.IGNORECASE)

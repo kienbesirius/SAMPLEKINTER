@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from .button import bind_canvas_button
 from .paint_asset import bind_canvas_asset
+from typing import Optional, Callable
 
 
 @dataclass
@@ -42,6 +43,7 @@ class GuidePanel:
         btn_pad_y: int = 10,
         auto_hide_on_done: bool = True,
         on_done: Optional[Callable[[], None]] = None,
+        on_confirm: Optional[Callable[[int, GuideStep], None]] = None,  
     ) -> None:
         self.root = root
         self.center_panel = center_panel
@@ -110,6 +112,8 @@ class GuidePanel:
                     return k
             return fallback if fallback in self.assets else (keys[0] if keys else fallback)
 
+        self.on_confirm = on_confirm  
+
         self._btn = bind_canvas_button(
             root=self.frame,
             canvas=self.cv_btn,
@@ -125,7 +129,7 @@ class GuidePanel:
             disabled_status=_pick_btn_key("fixture_button_confirm_disabled", "button_disabled", fallback="button_disabled"),
             text="",  # will set per-step
             text_font=("Tektur", 13, "bold"),
-            command=self.next,
+            command=self._on_confirm_click,
             cooldown_ms=500,
         )
 
@@ -185,6 +189,38 @@ class GuidePanel:
         self.idx += 1
         self._apply_step()
 
+    def _on_confirm_click(self) -> None:
+        """Confirm clicked: delegate to controller if provided, else fallback next()."""
+        if callable(self.on_confirm) and self.steps:
+            try:
+                self.on_confirm(self.idx, self.steps[self.idx])
+                return
+            except Exception:
+                pass
+        self.next()
+
+    # --- helper APIs for controller ---
+    def set_busy(self, busy: bool, *, text: Optional[str] = None) -> None:
+        try:
+            self._btn.set_disabled(busy)
+        except Exception:
+            pass
+        if text is not None:
+            self._btn_set_text(text)
+
+    def set_content(
+        self,
+        *,
+        title: Optional[str] = None,
+        image_key: Optional[str] = None,
+        confirm_text: Optional[str] = None,
+    ) -> None:
+        if title is not None:
+            self.title_var.set(title)
+        if confirm_text is not None:
+            self._btn_set_text(confirm_text)
+        if image_key is not None:
+            self._update_image(image_key)
     # ----------------------------
     # Internals
     # ----------------------------

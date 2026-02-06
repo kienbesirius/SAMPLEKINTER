@@ -1,6 +1,6 @@
 import tkinter as tk
 
-from sympy import root
+# from sympy import root
 from src.gui import gui
 from src.gui import gui204_count_primes
 from src.gui import gui279_perfect_squares

@@ -9,7 +9,7 @@ import tkinter as tk
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional, Tuple, Pattern
 from src.gui.gui279_perfect_squares import count_perfect_squares
 from src.platform import dpi
 from src.gui.asset import load_assets # TẢI ASSETS vào GDI (fonts) | 
@@ -259,7 +259,8 @@ class AppGUI:
                     return x, y, w, h
 
                 # Lấy size monitor trực tiếp
-                _, _, sw, sh = monitor_rect(monitor)
+                # _, _, sw, sh = monitor_rect(monitor)
+                sw, sh = int(monitor.width), int(monitor.height)
                 
                 canvas = tk.Canvas(win, bg=self.background_color, highlightthickness=0)
                 canvas.pack(fill=tk.BOTH, expand=True)
@@ -298,7 +299,9 @@ class AppGUI:
         self.background_color = "#652200"
         
         # Get monitors
-        self.monitors = get_monitors()
+        # self.monitors = get_monitors()
+        self.monitors = get_monitors(self.root)
+
         self.roots_extra: list[tk.Toplevel] = []
         # Get current monitors by pointer 
         px, py = root.winfo_pointerx(), root.winfo_pointery()
@@ -361,6 +364,8 @@ class AppGUI:
         # Apply fullscreen on current monitor
         fullscreen_on_monitor(self.root, self.current_window)
 
+        self._init_guide_flow()
+
         self.create_extra_windows()
 
         self._resolve_COM()
@@ -378,7 +383,7 @@ class AppGUI:
         }
 
         # self.root.after(3000, self.send_to_com("?"))
-        ### Example usage of slot status update
+        ### Example usage of slot status updateF
         # self.update_slot_status(slot_id=1, status="testing")
         # self.update_slot_status(slot_id=6, status="testing")
         # self.update_slot_status(slot_id=7, status="pass")
@@ -561,6 +566,7 @@ class AppGUI:
             assets=self.assets,
             tag="fixture_guide",
             on_done=_guide_done,
+            on_confirm=self._on_guide_confirm,
             auto_hide_on_done=False,
         )
 
@@ -931,7 +937,7 @@ class AppGUI:
         return "ADMIN" if self.is_admin else "OPER"
 
     def _get_admin_secret(self) -> str:
-        return "Foxconn168!!bechjkjen"
+        return "1..."
 
     def _verify_admin_password(self, pw: str) -> bool:
         secret = self._get_admin_secret()
@@ -1190,9 +1196,9 @@ class AppGUI:
     # Resolve COM port
     def _resolve_COM(self):
         # Get COM port and update UI through runner
-        self._task_hander = self.runner.submit(
+        self.io_taskq.submit(
             func=obtaining_fixture_com,
-            kwargs={"emit": self._update_logs_panel},
+            kwargs={},
             name="Obtain fixture COM",
             on_start=self._task_start_cb,
             on_success=lambda result, meta: self._resolve_COM_task_finished(result, meta),
@@ -1288,12 +1294,13 @@ class AppGUI:
             # sau reset thì reload UI (enqueue tiếp cũng OK, vì taskq serial)
             self.reload_slot_status()
 
-        self.taskq.submit(
-            func=_do,
-            kwargs={},
+        # On windows must pass the func directly
+        self.io_taskq.submit(
+            func=reset_slot_status_section_to_idle,
+            kwargs={"ini_path": self.cfg_path},
             name="Reset Slots",
             on_start=self._task_start_cb,
-            on_success=_ok,
+            on_success=lambda _result, _meta: self.reload_slot_status(),
             on_error=self._task_error_cb,
             on_finally=self._task_finally_cb,
             on_progress=self._task_progress_cb,
@@ -1312,12 +1319,12 @@ class AppGUI:
                     if slot:
                         slot.set_status(status)  # UI update: chạy trên main thread (callback)
 
-        self.taskq.submit(
-            func=_do,
-            kwargs={},
+        self.io_taskq.submit(
+            func=load_slot_status_from_ini,
+            kwargs={"ini_path": self.cfg_path},
             name="Reload Slots",
             on_start=self._task_start_cb,
-            on_success=_ok,
+            on_success=lambda status_map, _meta: _ok(status_map, _meta),
             on_error=self._task_error_cb,
             on_finally=self._task_finally_cb,
             on_progress=self._task_progress_cb,
@@ -1343,7 +1350,7 @@ class AppGUI:
                 if slot:
                     slot.set_status(new_status)
 
-        self.taskq.submit(
+        self.io_taskq.submit(
             func=_do,
             kwargs={},
             name=f"Update slot{slot_id}",
@@ -1503,3 +1510,108 @@ class AppGUI:
             return
         # cho phép đóng theo logic bạn đang có
         self._close_all_windows(win)
+
+
+    def _init_guide_flow(self):
+        self._guide_phase = 0              # 0=arm, 1=run-check
+        self._guide_slot_cursor = 1        # slot đang được guide điều khiển
+
+        # map step_idx -> (cmd, expect_regex)
+        self._guide_checks: dict[int, Tuple[str, Optional[Pattern[str]]]] = {
+            0: ("IN CLOSE", re.compile(r"close\s+fixture\s+ok", re.I)),
+            1: ("OUT OPEN", re.compile(r"open\s+fixture\s+ok", re.I)),
+            # ... add more
+        }
+
+        # khi tạo GuidePanel:
+        # self.guide_panel = GuidePanel(..., on_confirm=self._on_guide_confirm)
+        
+    def _get_active_guide_panel(self):
+        # window đang click button confirm thường sẽ là window đang focus
+        win = self._focused_window()
+        ws = self._get_widgets(win)
+        gp = ws.get("guide")
+
+        # fallback về main nếu vì lý do nào đó không tìm thấy
+        if gp is None:
+            gp = self.widgets_main.get("guide")
+        return gp
+
+
+    def _on_guide_confirm(self, step_idx: int, step):
+        gp = self._get_active_guide_panel()
+        if gp is None:
+            self._update_logs_panel("[guide] Missing guide panel instance", "yellow")
+            return
+
+        if step_idx not in self._guide_checks:
+            gp.next()
+            return
+
+        if self._guide_phase == 0:
+            self._guide_phase = 1
+            self.update_slot_status(self._guide_slot_cursor, "testing")
+
+            gp.set_content(
+                title="Đã set TESTING. Bấm lần nữa để bắt đầu kiểm tra...",
+                confirm_text="KIỂM TRA",
+            )
+            return
+
+        self._guide_phase = 0
+        cmd, expect = self._guide_checks[step_idx]
+
+        if not getattr(self, "listenport", None):
+            self._update_logs_panel("ListenPort chưa sẵn sàng. Đang resolve COM...", "yellow")
+            try:
+                self._resolve_COM()
+            except Exception:
+                pass
+            gp.set_content(confirm_text="THỬ LẠI")
+            return
+
+        gp.set_busy(True, text="ĐANG KIỂM TRA...")
+
+        dispatch = lambda fn: self.root.after(0, fn)
+
+        def _do():
+            ok, lines = self.listenport.send_and_collect(
+                cmd=cmd,
+                append_crlf=True,
+                expect=expect,
+                on_line=lambda s: dispatch(lambda: self._update_logs_panel(f"RX: {s}", "yellow")),
+            )
+            return ok, lines
+
+        def _ok(result, _meta):
+            ok, lines = result
+            gp.set_busy(False, text="XÁC NHẬN")
+
+            if ok:
+                self.update_slot_status(self._guide_slot_cursor, "pass")
+                self._guide_slot_cursor += 1
+                gp.next()
+            else:
+                self.update_slot_status(self._guide_slot_cursor, "fail")
+                gp.set_content(
+                    title="FAIL. Hãy thực hiện lại thao tác, rồi bấm THỬ LẠI.",
+                    confirm_text="THỬ LẠI",
+                )
+                gp.goto(step_idx)
+
+        def _err(e, _meta):
+            gp.set_busy(False, text="THỬ LẠI")
+            self.update_slot_status(self._guide_slot_cursor, "fail")
+            self._task_error_cb(e, _meta)
+
+        def _finally(_meta):
+            self._task_finally_cb(_meta)
+
+        self.io_taskq.submit(
+            func=_do,
+            name=f"Guide check step{step_idx+1}",
+            on_start=self._task_start_cb,
+            on_success=_ok,
+            on_error=_err,
+            on_finally=_finally,
+        )

@@ -363,7 +363,11 @@ def _load_fonts():
         # macOS hoặc OS khác: để trống hoặc bạn có thể bổ sung sau
         pass
 
-_load_fonts()
+import multiprocessing as mp
+
+if mp.current_process().name == "MainProcess":
+    _load_fonts()
+
 
 def tk_load_image_resources():
     imgs = {}
