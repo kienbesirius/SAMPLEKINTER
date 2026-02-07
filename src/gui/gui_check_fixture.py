@@ -566,16 +566,14 @@ class AppGUI:
         widgets["center_panel"] = center_panel
 
 
-        def _guide_done():
-            # Step cuối xong thì bạn làm gì tuỳ ý:
-            self._update_logs_panel("Guide completed.", "green")
+        
             
         guide = GuidePanel(
             root=win,
             center_panel=center_panel,
             assets=self.assets,
             tag="fixture_guide",
-            on_done=_guide_done,
+            on_done=None,
             on_confirm=self._on_guide_confirm,
             auto_hide_on_done=False,
         )
@@ -591,6 +589,12 @@ class AppGUI:
 
         return widgets
     
+
+    def _guide_done(self):
+        # Step cuối xong thì bạn làm gì tuỳ ý:
+        self.reset_slot_status()
+        self._update_logs_panel("Guide completed.", "green")
+
     def _flow_gui(self):
         pass
 
@@ -623,7 +627,7 @@ class AppGUI:
 
         def _ok():
             modal.hide()
-            self.reset_slot_status()   # gọi task reset của bạn
+            # self.reset_slot_status()   # gọi task reset của bạn
 
         tk.Button(row, text="Cancel", command=_cancel, width=10).pack(side="left", padx=8)
         tk.Button(row, text="OK", command=_ok, width=10).pack(side="left", padx=8)
@@ -1355,7 +1359,7 @@ class AppGUI:
                 if slot:
                     slot.set_status(new_status)
 
-        self.taskq.submit(
+        self.io_taskq.submit(
             func=_do,
             kwargs={},
             name=f"Update slot{slot_id}",
@@ -1603,12 +1607,12 @@ class AppGUI:
             img = "guide_sensor_top_right"
             title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc trên phải ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
             expect = re.compile(r"ok", re.I)
-        elif "SENSOR BOTTOM LEFT" in label:
+        elif "SENSOR BOT LEFT" in label:
             img = "guide_sensor_bottom_left"
             title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc dưới trái ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
             # theo dummy fixture bạn đã mô tả: có thể trả STOPPED/NG/timeout/EMC
             expect = re.compile(r"ok", re.I)
-        elif "SENSOR BOTTOM RIGHT" in label:
+        elif "SENSOR BOT RIGHT" in label:
             img = "guide_sensor_bottom_right"
             title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc dưới phải ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
             expect = re.compile(r"ok", re.I)
@@ -1721,7 +1725,7 @@ class AppGUI:
         try:
             first_slot = self._guide_plan[0].slot_id
             self.update_slot_status(first_slot, "testing")
-            self.reset_slot_status()
+            # self.reset_slot_status()
         except Exception:
             pass
 
@@ -1737,7 +1741,6 @@ class AppGUI:
         return gp
 
     def _on_guide_confirm(self, step_idx: int, step):
-        
         # Check self.com_status is exists and listening
         if not hasattr(self, "com_status") or self.com_status != "listening":
             self._update_logs_panel("[guide] COM port not ready", "red")
@@ -1767,6 +1770,7 @@ class AppGUI:
         # done step => restart
         done_idx = len(self._guide_plan) + 1
         if step_idx == done_idx:
+            self._guide_done()
             self._guide_reset()
             return
 
@@ -1806,7 +1810,7 @@ class AppGUI:
             if ok:
                 # PASS slot hiện tại
                 self.update_slot_status(slot_id, "pass")
-                self.reset_slot_status()
+                # self.reset_slot_status()
                 self._guide_attempts[slot_id] = 0
 
                 # nếu hết slot => done
@@ -1817,7 +1821,7 @@ class AppGUI:
                     self._guide_set_content_all(
                         title="PASS toàn bộ slot. Fixture OK.",
                         image_key="fixture_240x240",
-                        confirm_text="BẮT ĐẦU LẠI",
+                        confirm_text="Thoát",
                     )
                     return
 
@@ -1829,7 +1833,7 @@ class AppGUI:
 
                 # set TESTING cho slot tiếp theo
                 self.update_slot_status(next_case.slot_id, "testing")
-                self.reset_slot_status()
+                # self.reset_slot_status()
                 return
 
             # FAIL (non-final / final)
@@ -1839,7 +1843,7 @@ class AppGUI:
             if att >= self._guide_max_attempts:
                 # FAIL FINAL => kết thúc while
                 self.update_slot_status(slot_id, "fail")
-                self.reset_slot_status()
+                # self.reset_slot_status()
                 self._guide_running = False
                 self._guide_current_step = done_idx
                 self._guide_goto_all(done_idx)
@@ -1852,7 +1856,7 @@ class AppGUI:
 
             # fail nhưng cho retry => slot vẫn TESTING, chờ user confirm lần nữa
             self.update_slot_status(slot_id, "testing")
-            self.reset_slot_status()
+            # self.reset_slot_status()
             self._guide_set_content_all(
                 title=f"FAIL ({att}/{self._guide_max_attempts}).\n{case.title}\nHãy thực hiện lại thao tác rồi bấm THỬ LẠI.",
                 confirm_text="THỬ LẠI",
@@ -1865,7 +1869,7 @@ class AppGUI:
             self._guide_set_busy_all(False, text="THỬ LẠI")
             try:
                 self.update_slot_status(slot_id, "fail")
-                self.reset_slot_status()
+                # self.reset_slot_status()
             except Exception:
                 pass
             self._task_error_cb(e, _meta)
