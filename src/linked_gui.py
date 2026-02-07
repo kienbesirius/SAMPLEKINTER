@@ -6,6 +6,7 @@ from src.gui import gui204_count_primes
 from src.gui import gui279_perfect_squares
 from src.gui import gui_check_fixture
 from src.gui import gui_bypass
+from src.gui import gui_bypass_mo_panel
 
 def main_gui():
 	APP_NAME = "BypassSampleKinterApp"
@@ -17,11 +18,13 @@ def main_gui():
 
 	# app = gui204_count_primes.LeetCode204_Gui(root)
 	# app = gui279_perfect_squares.LeetCode279_Gui(root)
-	app = gui_check_fixture.AppGUI(root)
+	# app = gui_check_fixture.AppGUI(root)
 	# app = gui_bypass.AppGUI(root)
+	app = gui_bypass_mo_panel.AppGUI(root)
 	# app = gui.AppGUI(root)
 	root.mainloop()
 
 if __name__ == "__main__":
 	main_gui()
 	
+

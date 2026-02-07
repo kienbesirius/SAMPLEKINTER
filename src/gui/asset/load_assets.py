@@ -244,6 +244,12 @@ ASSET_FILES = {
     "entry_wide_3_disabled": RESOURCE_PATH / "blank" / "entry-wide-3-disabled.png", # 22 char (+5)
 
     "text_area": RESOURCE_PATH / "blank" / "text-area.png", # 7 char
+    "bg_248x148": RESOURCE_PATH / "blank" / "bg_248x148.png", # 7 char
+    "bg_480x148": RESOURCE_PATH / "blank" / "bg_480x148.png", # 7 char
+    "bg_248x148_0.75": RESOURCE_PATH / "blank" / "bg_248x148.png", # 7 char
+    "bg_480x148_0.75": RESOURCE_PATH / "blank" / "bg_480x148.png", # 7 char
+    "bg_248x148_0.5": RESOURCE_PATH / "blank" / "bg_248x148.png", # 7 char
+    "bg_480x148_0.5": RESOURCE_PATH / "blank" / "bg_480x148.png", # 7 char
     "text_wide_1_area": RESOURCE_PATH / "blank" / "text-wide-1-area.png", # 12 char (+5)
     "text_wide_2_area": RESOURCE_PATH / "blank" / "text-wide-2-area.png", # 17 char (+5)
     "text_wide_3_area": RESOURCE_PATH / "blank" / "text-wide-3-area.png", # 22 char (+5)
