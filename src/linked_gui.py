@@ -18,9 +18,9 @@ def main_gui():
 
 	# app = gui204_count_primes.LeetCode204_Gui(root)
 	# app = gui279_perfect_squares.LeetCode279_Gui(root)
-	# app = gui_check_fixture.AppGUI(root)
+	app = gui_check_fixture.AppGUI(root)
 	# app = gui_bypass.AppGUI(root)
-	app = gui_bypass_mo_panel.AppGUI(root)
+	# app = gui_bypass_mo_panel.AppGUI(root)
 	# app = gui.AppGUI(root)
 	root.mainloop()
 

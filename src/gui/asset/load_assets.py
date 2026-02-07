@@ -221,6 +221,12 @@ ASSET_FILES = {
     "fixture_text_com15": RESOURCE_PATH / "fixture" / "TEXT_COM15.png",
     "fixture_text_com16": RESOURCE_PATH / "fixture" / "TEXT_COM16.png",
     "fixture_text_com17": RESOURCE_PATH / "fixture" / "TEXT_COM17.png",
+
+    "guide_sensor_top_left": RESOURCE_PATH / "fixture" / "guide_sensor_top_left.png",
+    "guide_sensor_top_right": RESOURCE_PATH / "fixture" / "guide_sensor_top_right.png",
+    "guide_sensor_bottom_left": RESOURCE_PATH / "fixture" / "guide_sensor_bottom_left.png",
+    "guide_sensor_bottom_right": RESOURCE_PATH / "fixture" / "guide_sensor_bottom_right.png",
+    
     # Blank design
     "button_normal": RESOURCE_PATH / "blank" / "button-normal.png",
     "button_hover": RESOURCE_PATH / "blank" / "button-hover.png",

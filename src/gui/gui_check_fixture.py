@@ -8,12 +8,12 @@ import math
 import tkinter as tk
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal
+from typing import Any, Dict, List, Literal, Sequence
 from typing import Callable, Optional, Tuple, Pattern
 from src.gui.gui279_perfect_squares import count_perfect_squares
 from src.platform import dpi
-from src.gui.asset import load_assets # TẢI ASSETS vào GDI (fonts) | 
-from src.utils import sub_thread # SubProcessThread: XỬ LÝ SUB THREAD (TASKS) | Tách biệt main tkinter GUI thread với các tác vụ nền
+from src.gui.asset import load_assets 
+from src.utils import sub_thread 
 from src.utils.resource_path import RESOURCE_PATH, FONT_PATH, ICONS_PATH, app_dir
 from src.utils.buffer_logger import build_log_buffer
 from src.gui.widgets.button import bind_canvas_button
@@ -30,9 +30,20 @@ from src.gui.fixture.fill_multiple_monitor import fullscreen_on_monitor, get_mon
 from src.gui.fixture.get_fixture_port import get_fixture_port, parse_fixture_port_text
 from src.gui.fixture.get_serial_list import get_serial_ports
 from src.gui.fixture.listen_port import ListenPort
-from src.utils.config_go import load_fixture_cfg, choose_slot_font, reset_slot_status_section_to_idle, update_ini_slot_status, load_slot_status_from_ini, SlotStatus, _ALLOWED_STATUS,update_ini_fixture_section, update_ini_manual_slot_info
+from src.utils.config_go import load_fixture_cfg, choose_slot_font, reset_slot_status_section_to_idle, update_ini_slot_status, load_slot_status_from_ini, SlotStatus, _ALLOWED_STATUS, update_ini_fixture_section, update_ini_manual_slot_info
 from src.gui.widgets.dialog import ModalOverlay
 import tkinter.font as tkfont
+
+
+@dataclass
+class GuideCase:
+    """Một case kiểm tra gắn với 1 slot trong luồng GuidePanel."""
+    slot_id: int
+    slot_label: str
+    title: str
+    image_key: str
+    cmd: str
+    expect: Optional[Pattern[str]] = None
 
 
 # CORE-1: Getting fixture port
@@ -384,12 +395,12 @@ class AppGUI:
 
         # self.root.after(3000, self.send_to_com("?"))
         ### Example usage of slot status updateF
-        # self.update_slot_status(slot_id=1, status="testing")
+        # self.update_slot_status(slot_id=1, status="idle")
         # self.update_slot_status(slot_id=6, status="testing")
         # self.update_slot_status(slot_id=7, status="pass")
         # self.update_slot_status(slot_id=12, status="fail")
         # # reset slot status after 5s
-        # self.root.after(5000, self.reset_slot_status)
+        
     
     # TODO: Create UI for testing fixture
     def _build_gui(self, *, win: tk.Misc, canvas: tk.Canvas, sw: int, sh: int):
@@ -557,9 +568,8 @@ class AppGUI:
 
         def _guide_done():
             # Step cuối xong thì bạn làm gì tuỳ ý:
-            # ví dụ: bật lại nút start / cho phép click slot / v.v...
-            print("Guide done!")
-
+            self._update_logs_panel("Guide completed.", "green")
+            
         guide = GuidePanel(
             root=win,
             center_panel=center_panel,
@@ -570,23 +580,7 @@ class AppGUI:
             auto_hide_on_done=False,
         )
 
-        guide.set_steps([
-            GuideStep(
-                title="Xin thực hiện ĐÓNG FIXTURE (IN CLOSE).",
-                image_key="guide_close_fixture",   # assets phải có key này (và có thể có _0.5/_0.75)
-                confirm_text="",
-            ),
-            GuideStep(
-                title="Xin thực hiện MỞ FIXTURE (OUT OPEN).",
-                image_key="guide_open_fixture",
-                confirm_text="",
-            ),
-            GuideStep(
-                title="Hoàn tất. Bấm xác nhận để bắt đầu test.",
-                image_key="guide_done",
-                confirm_text="",
-            ),
-        ])
+        guide.set_steps(self._build_guide_preview_steps())
 
         guide.start()
 
@@ -1231,6 +1225,7 @@ class AppGUI:
                 if com1:
                     com1.set_status("not_found")
                     com1.set_disabled(True)
+                    self.com_status = "not_found"
             return
 
         # 4) start ListenPort 1 lần
@@ -1244,10 +1239,10 @@ class AppGUI:
                 dispatch=dispatch,
             )
             self.listenport.start()
-            status = "listening"
+            status = self.com_status = "listening"
         except Exception as e:
             self._update_logs_panel(f"Error starting ListenPort: {e}", "red")
-            status = "error"
+            status = self.com_status = "error"
 
         # 5) apply status cho tất cả window
         for w in self._iter_windows():
@@ -1257,7 +1252,7 @@ class AppGUI:
                 com1.set_status(status)
                 com1.set_disabled(True)
 
-    def send_to_com(self, cmd: str):
+    def send_to_com(self, cmd: str, on_start, on_success, on_error, on_finally):
         def _do():
             if not self.listenport:
                 raise RuntimeError("ListenPort not initialized")
@@ -1275,13 +1270,23 @@ class AppGUI:
             if lines:
                 self._update_logs_panel(f"RX last: {lines[-1]}", "green" if ok else "yellow")
 
+        # Check callable
+        if not callable(on_start):
+            on_start = self._task_start_cb
+        if not callable(on_success):
+            on_success = _ok
+        if not callable(on_error):
+            on_error = self._task_error_cb
+        if not callable(on_finally):
+            on_finally = self._task_finally_cb
+
         self.io_taskq.submit(
             func=_do,
             name="Send to COM",
-            on_start=self._task_start_cb,
-            on_success=_ok,
-            on_error=self._task_error_cb,
-            on_finally=self._task_finally_cb,
+            on_start=on_start,
+            on_success=on_success,
+            on_error=on_error,
+            on_finally=on_finally,
         )
 
 
@@ -1350,7 +1355,7 @@ class AppGUI:
                 if slot:
                     slot.set_status(new_status)
 
-        self.io_taskq.submit(
+        self.taskq.submit(
             func=_do,
             kwargs={},
             name=f"Update slot{slot_id}",
@@ -1512,20 +1517,214 @@ class AppGUI:
         self._close_all_windows(win)
 
 
+    # ----------------------------
+    # GUIDE FLOW (theo slot + retry)
+    # ----------------------------
     def _init_guide_flow(self):
-        self._guide_phase = 0              # 0=arm, 1=run-check
-        self._guide_slot_cursor = 1        # slot đang được guide điều khiển
+        # trạng thái luồng guide (điều khiển theo slot, retry tối đa)
+        self._guide_busy: bool = False
+        self._guide_running: bool = False
+        self._guide_max_attempts: int = 3
 
-        # map step_idx -> (cmd, expect_regex)
-        self._guide_checks: dict[int, Tuple[str, Optional[Pattern[str]]]] = {
-            0: ("IN CLOSE", re.compile(r"close\s+fixture\s+ok", re.I)),
-            1: ("OUT OPEN", re.compile(r"open\s+fixture\s+ok", re.I)),
-            # ... add more
-        }
+        # Plan sẽ được build lại mỗi lần bấm "BẮT ĐẦU"
+        self._guide_plan: list[GuideCase] = []
+        self._guide_attempts: dict[int, int] = {}
+        self._guide_current_step: int = 0  # 0 = welcome, 1..N = slot steps, N+1 = done
 
-        # khi tạo GuidePanel:
-        # self.guide_panel = GuidePanel(..., on_confirm=self._on_guide_confirm)
+    def _iter_guide_panels(self):
+        for w in self._iter_windows():
+            ws = self._get_widgets(w)
+            gp = ws.get("guide")
+            if gp is not None:
+                yield gp
+
+    def _guide_goto_all(self, idx: int) -> None:
+        for gp in self._iter_guide_panels():
+            try:
+                gp.goto(idx)
+            except Exception:
+                pass
+
+    def _guide_set_content_all(
+        self,
+        *,
+        title: Optional[str] = None,
+        image_key: Optional[str] = None,
+        confirm_text: Optional[str] = None,
+    ) -> None:
+        for gp in self._iter_guide_panels():
+            try:
+                gp.set_content(title=title, image_key=image_key, confirm_text=confirm_text)
+            except Exception:
+                pass
+
+    def _guide_set_busy_all(self, busy: bool, *, text: Optional[str] = None) -> None:
+        for gp in self._iter_guide_panels():
+            try:
+                gp.set_busy(busy, text=text)
+            except Exception:
+                pass
+
+    def _guide_make_case(self, slot_id: int, slot_label: str, slot_cmd0: str) -> GuideCase:
+        label = (slot_label or "").strip().upper()
+        cmd0 = (slot_cmd0 or "").strip()
         
+        # --- choose cmd ---
+        cmd = cmd0
+        if not cmd:
+            if label in ("IN", "IN CLOSE", "CLOSE", "CLOSE FIXTURE"):
+                cmd = "IN CLOSE"
+            elif label in ("OUT", "OUT OPEN", "OPEN", "OPEN FIXTURE"):
+                cmd = "OUT OPEN"
+            elif "FORCE" in label or "STOP" in label:
+                cmd = "FORCE STOP"
+            elif "RESET" in label:
+                cmd = "RESET"
+            elif "SENSOR" in label:
+                cmd = "SENSOR"
+            else:
+                cmd = label or "IN CLOSE"
+
+        print(f"Making guide case for Slot{slot_id}: label={label!r}, cmd0={cmd0!r}")
+
+
+        # --- choose expect + image + title ---
+        img = "fixture_240x240"
+        title = f"[Slot{slot_id}] {label or 'CHECK'}"
+        expect: Optional[Pattern[str]] = None
+
+        up_cmd = cmd.strip().upper()
+
+        if "SENSOR TOP LEFT" in label:
+            img = "guide_sensor_top_left"
+            title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc trên trái ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
+            expect = re.compile(r"ok", re.I)
+        elif "SENSOR TOP RIGHT" in label:
+            img = "guide_sensor_top_right"
+            title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc trên phải ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
+            expect = re.compile(r"ok", re.I)
+        elif "SENSOR BOTTOM LEFT" in label:
+            img = "guide_sensor_bottom_left"
+            title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc dưới trái ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
+            # theo dummy fixture bạn đã mô tả: có thể trả STOPPED/NG/timeout/EMC
+            expect = re.compile(r"ok", re.I)
+        elif "SENSOR BOTTOM RIGHT" in label:
+            img = "guide_sensor_bottom_right"
+            title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc dưới phải ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
+            expect = re.compile(r"ok", re.I)
+        elif "SENSOR" in up_cmd:
+            img = "guide_close_fixture"
+            title = f"[Slot{slot_id}] Hãy dùng công cụ che SENSOR ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
+            expect = re.compile(r"ok", re.I)
+
+        return GuideCase(
+            slot_id=slot_id,
+            slot_label=label,
+            title=title,
+            image_key=img,
+            cmd=cmd,
+            expect=expect,
+        )
+
+    def _guide_build_plan(self) -> list[GuideCase]:
+        """Đọc config.ini và build plan các slot có nội dung test."""
+        try:
+            self.fx_cfg = load_fixture_cfg(app_dir() / "config.ini")
+        except Exception:
+            pass
+
+        plan: list[GuideCase] = []
+        fx = getattr(self, "fx_cfg", None)
+        if fx is not None:
+            for slot_id in range(1, 13):
+                lbl = (fx.slot_text.get(slot_id, "") or "").strip()
+                if not lbl:
+                    continue
+                cmd0 = (fx.slot_command.get(slot_id, "") or "").strip()
+                plan.append(self._guide_make_case(slot_id, lbl, cmd0))
+
+        # fallback tối thiểu (để không crash UI)
+        if not plan:
+            plan = [self._guide_make_case(1, "IN", "IN CLOSE")]
+
+        return plan
+
+    def _guide_build_steps(self, plan: Sequence[GuideCase]) -> list[GuideStep]:
+        steps: list[GuideStep] = []
+
+        # welcome
+        steps.append(
+            GuideStep(
+                title="Bấm BẮT ĐẦU để bắt đầu kiểm tra fixture.",
+                image_key="fixture_240x240",
+                confirm_text="BẮT ĐẦU",
+            )
+        )
+
+        # slot steps
+        for c in plan:
+            steps.append(
+                GuideStep(
+                    title=c.title,
+                    image_key=c.image_key,
+                    confirm_text="XÁC NHẬN",
+                )
+            )
+
+        # done step (dùng cho cả PASS ALL hoặc FAIL FINAL)
+        steps.append(
+            GuideStep(
+                title="Kết thúc. Bấm BẮT ĐẦU LẠI để chạy lại.",
+                image_key="fixture_240x240",
+                confirm_text="BẮT ĐẦU LẠI",
+            )
+        )
+        return steps
+
+    def _build_guide_preview_steps(self) -> list[GuideStep]:
+        # preview = welcome + slot steps + done (dựa theo config hiện tại)
+        plan = self._guide_build_plan()
+        return self._guide_build_steps(plan)
+
+    def _guide_apply_steps_all_windows(self, steps: Sequence[GuideStep], *, start_index: int = 0) -> None:
+        for gp in self._iter_guide_panels():
+            try:
+                gp.set_steps(steps, start_index=start_index)
+                gp.start()
+            except Exception:
+                pass
+
+    def _guide_reset(self) -> None:
+        self._guide_busy = False
+        self._guide_running = False
+        self._guide_plan = []
+        self._guide_attempts = {}
+        self._guide_current_step = 0
+
+        steps = self._build_guide_preview_steps()
+        self._guide_apply_steps_all_windows(steps, start_index=0)
+        self._guide_goto_all(0)
+
+    def _guide_start_run(self) -> None:
+        # rebuild plan + steps từ config mỗi lần start
+        self._guide_plan = self._guide_build_plan()
+        self._guide_attempts = {c.slot_id: 0 for c in self._guide_plan}
+        steps = self._guide_build_steps(self._guide_plan)
+
+        self._guide_apply_steps_all_windows(steps, start_index=0)
+
+        self._guide_running = True
+        self._guide_current_step = 1
+
+        # enter slot đầu tiên: set TESTING + show guide step1
+        self._guide_goto_all(1)
+        try:
+            first_slot = self._guide_plan[0].slot_id
+            self.update_slot_status(first_slot, "testing")
+            self.reset_slot_status()
+        except Exception:
+            pass
+
     def _get_active_guide_panel(self):
         # window đang click button confirm thường sẽ là window đang focus
         win = self._focused_window()
@@ -1537,81 +1736,141 @@ class AppGUI:
             gp = self.widgets_main.get("guide")
         return gp
 
-
     def _on_guide_confirm(self, step_idx: int, step):
+        
+        # Check self.com_status is exists and listening
+        if not hasattr(self, "com_status") or self.com_status != "listening":
+            self._update_logs_panel("[guide] COM port not ready", "red")
+            return
+        
         gp = self._get_active_guide_panel()
         if gp is None:
             self._update_logs_panel("[guide] Missing guide panel instance", "yellow")
             return
 
-        if step_idx not in self._guide_checks:
-            gp.next()
+        # chặn spam click khi đang chạy command
+        if getattr(self, "_guide_busy", False):
             return
 
-        if self._guide_phase == 0:
-            self._guide_phase = 1
-            self.update_slot_status(self._guide_slot_cursor, "testing")
-
-            gp.set_content(
-                title="Đã set TESTING. Bấm lần nữa để bắt đầu kiểm tra...",
-                confirm_text="KIỂM TRA",
-            )
-            return
-
-        self._guide_phase = 0
-        cmd, expect = self._guide_checks[step_idx]
-
-        if not getattr(self, "listenport", None):
-            self._update_logs_panel("ListenPort chưa sẵn sàng. Đang resolve COM...", "yellow")
+        # nếu chưa có plan (vd: vừa mở app) -> reset preview
+        if not getattr(self, "_guide_plan", None):
             try:
-                self._resolve_COM()
+                self._guide_reset()
             except Exception:
                 pass
-            gp.set_content(confirm_text="THỬ LẠI")
+
+        # --- STEP 0: BẮT ĐẦU ---
+        if step_idx == 0:
+            self._guide_start_run()
             return
 
-        gp.set_busy(True, text="ĐANG KIỂM TRA...")
+        # done step => restart
+        done_idx = len(self._guide_plan) + 1
+        if step_idx == done_idx:
+            self._guide_reset()
+            return
+
+        # nếu user click lệch step (multi-window), kéo về step hiện tại
+        if self._guide_running and step_idx != self._guide_current_step:
+            self._guide_goto_all(self._guide_current_step)
+            return
+
+        # --- slot step ---
+        if not (1 <= step_idx <= len(self._guide_plan)):
+            # out of range => an toàn: reset
+            self._guide_reset()
+            return
+
+        case = self._guide_plan[step_idx - 1]
+        slot_id = case.slot_id
+
+        self._guide_busy = True
+        self._guide_set_busy_all(True, text="ĐANG KIỂM TRA...")
 
         dispatch = lambda fn: self.root.after(0, fn)
 
         def _do():
             ok, lines = self.listenport.send_and_collect(
-                cmd=cmd,
+                cmd=case.cmd,
                 append_crlf=True,
-                expect=expect,
+                expect=case.expect,
                 on_line=lambda s: dispatch(lambda: self._update_logs_panel(f"RX: {s}", "yellow")),
             )
             return ok, lines
 
         def _ok(result, _meta):
             ok, lines = result
-            gp.set_busy(False, text="XÁC NHẬN")
+            self._guide_busy = False
+            self._guide_set_busy_all(False, text="XÁC NHẬN")
 
             if ok:
-                self.update_slot_status(self._guide_slot_cursor, "pass")
-                self._guide_slot_cursor += 1
-                gp.next()
-            else:
-                self.update_slot_status(self._guide_slot_cursor, "fail")
-                gp.set_content(
-                    title="FAIL. Hãy thực hiện lại thao tác, rồi bấm THỬ LẠI.",
-                    confirm_text="THỬ LẠI",
+                # PASS slot hiện tại
+                self.update_slot_status(slot_id, "pass")
+                self.reset_slot_status()
+                self._guide_attempts[slot_id] = 0
+
+                # nếu hết slot => done
+                if step_idx >= len(self._guide_plan):
+                    self._guide_running = False
+                    self._guide_current_step = done_idx
+                    self._guide_goto_all(done_idx)
+                    self._guide_set_content_all(
+                        title="PASS toàn bộ slot. Fixture OK.",
+                        image_key="fixture_240x240",
+                        confirm_text="BẮT ĐẦU LẠI",
+                    )
+                    return
+
+                # move next slot
+                next_step = step_idx + 1
+                next_case = self._guide_plan[next_step - 1]
+                self._guide_current_step = next_step
+                self._guide_goto_all(next_step)
+
+                # set TESTING cho slot tiếp theo
+                self.update_slot_status(next_case.slot_id, "testing")
+                self.reset_slot_status()
+                return
+
+            # FAIL (non-final / final)
+            att = int(self._guide_attempts.get(slot_id, 0)) + 1
+            self._guide_attempts[slot_id] = att
+
+            if att >= self._guide_max_attempts:
+                # FAIL FINAL => kết thúc while
+                self.update_slot_status(slot_id, "fail")
+                self.reset_slot_status()
+                self._guide_running = False
+                self._guide_current_step = done_idx
+                self._guide_goto_all(done_idx)
+                self._guide_set_content_all(
+                    title=f"FAIL FINAL tại Slot{slot_id} ({att}/{self._guide_max_attempts}). Dừng kiểm tra.",
+                    image_key="fixture_240x240",
+                    confirm_text="BẮT ĐẦU LẠI",
                 )
-                gp.goto(step_idx)
+                return
+
+            # fail nhưng cho retry => slot vẫn TESTING, chờ user confirm lần nữa
+            self.update_slot_status(slot_id, "testing")
+            self.reset_slot_status()
+            self._guide_set_content_all(
+                title=f"FAIL ({att}/{self._guide_max_attempts}).\n{case.title}\nHãy thực hiện lại thao tác rồi bấm THỬ LẠI.",
+                confirm_text="THỬ LẠI",
+            )
+            # stay on the same step
+            self._guide_goto_all(step_idx)
 
         def _err(e, _meta):
-            gp.set_busy(False, text="THỬ LẠI")
-            self.update_slot_status(self._guide_slot_cursor, "fail")
+            self._guide_busy = False
+            self._guide_set_busy_all(False, text="THỬ LẠI")
+            try:
+                self.update_slot_status(slot_id, "fail")
+                self.reset_slot_status()
+            except Exception:
+                pass
             self._task_error_cb(e, _meta)
 
         def _finally(_meta):
             self._task_finally_cb(_meta)
 
-        self.io_taskq.submit(
-            func=_do,
-            name=f"Guide check step{step_idx+1}",
-            on_start=self._task_start_cb,
-            on_success=_ok,
-            on_error=_err,
-            on_finally=_finally,
-        )
+        self.send_to_com(case.cmd, on_start=self._task_start_cb, on_success=_ok, on_error=_err, on_finally=_finally)

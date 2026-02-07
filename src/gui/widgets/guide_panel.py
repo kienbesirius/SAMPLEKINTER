@@ -5,8 +5,8 @@ import tkinter as tk
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
-from .button import bind_canvas_button
-from .paint_asset import bind_canvas_asset
+from src.gui.widgets.button import bind_canvas_button
+from src.gui.widgets.paint_asset import bind_canvas_asset
 from typing import Optional, Callable
 
 
@@ -14,7 +14,7 @@ from typing import Optional, Callable
 class GuideStep:
     title: str                      # ví dụ: "Xin thực hiện đóng fixture..."
     image_key: str                  # key ảnh trong assets (base key)
-    confirm_text: str = ""  # text trên button (có thể để "" nếu button asset đã có chữ)
+    confirm_text: str = "Bắt đầu"  # text trên button (có thể để "" nếu button asset đã có chữ)
     # bạn có thể mở rộng thêm: hint_text, auto_delay, v.v...
 
 
@@ -120,14 +120,15 @@ class GuidePanel:
             assets=self.assets,
             tag=f"{self.tag}__confirm",
             x=10, y=10,  # will layout later
-            normal_status=_pick_btn_key("fixture_button_confirm_normal", "button_normal", fallback="button_normal"),
-            hover_status=_pick_btn_key("fixture_button_confirm_hover", "button_hover", fallback="button_hover"),
+            normal_status=_pick_btn_key("fixture_button_no_label_normal", "button_normal", fallback="button_normal"),
+            hover_status=_pick_btn_key("fixture_button_no_label_hover", "button_hover", fallback="button_hover"),
             active_status=_pick_btn_key(
-                "fixture_button_confirm_pressed", "fixture_button_confirm_active", "button_active",
+                "fixture_button_no_label_pressed", "fixture_button_no_label_active", "button_active",
                 fallback="button_active",
             ),
-            disabled_status=_pick_btn_key("fixture_button_confirm_disabled", "button_disabled", fallback="button_disabled"),
-            text="",  # will set per-step
+            disabled_status=_pick_btn_key("fixture_button_no_label_disabled", "button_disabled", fallback="button_disabled"),
+            text="BẮT ĐẦU",  # will set per-step
+            text_fill="white",
             text_font=("Tektur", 13, "bold"),
             command=self._on_confirm_click,
             cooldown_ms=500,

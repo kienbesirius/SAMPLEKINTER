@@ -62,7 +62,14 @@ HELP_RESPONSE = """[08:31:32:400] CONTROL CAMMAND:
 [08:31:32:675] CLEAR_PARA_MOTOR:CLEAR MOTOR PARAMETER
 """
 
+OK_BYTES = "ok"
+
 HELP_BYTES = (HELP_RESPONSE.strip("\n").replace("\n", "\r\n") + "\r\n").encode("utf-8", errors="replace")
+
+OK_BYTES = (OK_BYTES.strip("\n").replace("\n", "\r\n") + "\r\n").encode("utf-8", errors="replace")
+
+
+FAIL_BYTES = b"fail\r\n"
 
 def write_all(
     ser: serial.Serial,
@@ -136,7 +143,7 @@ def main() -> None:
             # --- CASES bạn yêu cầu ---
             if cmd == "IN CLOSE" or cmd == "CLOSE" or cmd == "IN":
                 print("RX 'IN CLOSE' -> close fixture ok")
-                _send_line(ser, "close fixture ok")
+                _send_line(ser, "ok")
                 return
 
             if cmd == "OUT OPEN" or cmd == "OPEN" or cmd == "OUT":
