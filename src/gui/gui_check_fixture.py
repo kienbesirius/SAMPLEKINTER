@@ -1256,7 +1256,7 @@ class AppGUI:
                 com1.set_status(status)
                 com1.set_disabled(True)
 
-    def send_to_com(self, cmd: str, on_start, on_success, on_error, on_finally):
+    def send_to_com(self, cmd: str, on_start, on_success, on_error, on_finally, expect=None, reject=None):
         def _do():
             if not self.listenport:
                 raise RuntimeError("ListenPort not initialized")
@@ -1264,6 +1264,8 @@ class AppGUI:
             ok, lines = self.listenport.send_and_collect(
                 cmd=cmd,
                 append_crlf=True, 
+                expect=expect,
+                reject=reject,
                 on_line=lambda s: dispatch(lambda: self._update_logs_panel(f"RX: {s}", "yellow"))
             )
             return ok, lines
@@ -1597,15 +1599,23 @@ class AppGUI:
         title = f"[Slot{slot_id}] {label or 'CHECK'}"
         expect: Optional[Pattern[str]] = None
 
+
+        ## TODO: CATCH patterns
+        # OK_WORDS = ["ok", "pass", "passed", "success", "done"]
+        # expect = re.compile(r"\b(?:%s)\b" % "|".join(map(re.escape, OK_WORDS)), re.I)
+        # reject = re.compile(r"\b(?:not\s+ok|fail(?:ed)?|ng|error|timeout)\b", re.I)
         up_cmd = cmd.strip().upper()
 
         if "SENSOR TOP LEFT" in label:
             img = "guide_sensor_top_left"
             title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc trên trái ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
-            expect = re.compile(r"ok", re.I)
+            expect = re.compile(r"oky", re.I)
+            ## TODO: CATCH patterns
+            # expect = re.compile(r"\b(?:ok|pass(?:ed)?|success|done)\b", re.I)
         elif "SENSOR TOP RIGHT" in label:
             img = "guide_sensor_top_right"
             title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc trên phải ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
+            ## TODO: CATCH patterns
             expect = re.compile(r"ok", re.I)
         elif "SENSOR BOT LEFT" in label:
             img = "guide_sensor_bottom_left"
@@ -1877,4 +1887,4 @@ class AppGUI:
         def _finally(_meta):
             self._task_finally_cb(_meta)
 
-        self.send_to_com(case.cmd, on_start=self._task_start_cb, on_success=_ok, on_error=_err, on_finally=_finally)
+        self.send_to_com(case.cmd, on_start=self._task_start_cb, on_success=_ok, on_error=_err, on_finally=_finally, expect=case.expect, reject=None)

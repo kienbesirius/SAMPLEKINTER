@@ -225,6 +225,7 @@ class ListenPort:
         timeout: float = 5.0,
         idle_after_last_rx: float = 0.6,
         expect: Optional[Pattern[str]] = None,
+        reject: Optional[Pattern[str]] = None,
         append_crlf: bool = True,
         clear_before_send: bool = True,
         on_line: Optional[Callable[[str], None]] = None,  # <-- emit realtime (per-command)
