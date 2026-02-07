@@ -4,6 +4,7 @@ from typing import List, Optional
 import os
 import re
 import subprocess
+import sys
 import tkinter as tk
 
 @dataclass(frozen=True)

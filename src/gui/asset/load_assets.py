@@ -52,6 +52,24 @@ ASSET_FILES = {
     "fixture_reset_guide_240x240": RESOURCE_PATH / "fixture" / "fixture_reset_guide_240x240.png",
     "fixture_240x240": RESOURCE_PATH / "fixture" / "fixture_240x240.png",
 
+
+    # Button no_label
+    "fixture_button_no_label_normal_0.5": RESOURCE_PATH / "fixture" / "button_no_label_0_5.png",
+    "fixture_button_no_label_hover_0.5": RESOURCE_PATH / "fixture" / "button_no_label_hover_0_5.png",
+    "fixture_button_no_label_pressed_0.5": RESOURCE_PATH / "fixture" / "button_no_label_pressed_0_5.png",
+    "fixture_button_no_label_disabled_0.5": RESOURCE_PATH / "fixture" / "button_no_label_disabled_0_5.png",
+
+    "fixture_button_no_label_normal_0.75": RESOURCE_PATH / "fixture" / "button_no_label_0_75.png",
+    "fixture_button_no_label_hover_0.75": RESOURCE_PATH / "fixture" / "button_no_label_hover_0_75.png",
+    "fixture_button_no_label_pressed_0.75": RESOURCE_PATH / "fixture" / "button_no_label_pressed_0_75.png",
+    "fixture_button_no_label_disabled_0.75": RESOURCE_PATH / "fixture" / "button_no_label_disabled_0_75.png",
+
+    "fixture_button_no_label_normal": RESOURCE_PATH / "fixture" / "button_no_label.png",
+    "fixture_button_no_label_hover": RESOURCE_PATH / "fixture" / "button_no_label_hover.png",
+    "fixture_button_no_label_pressed": RESOURCE_PATH / "fixture" / "button_no_label_pressed.png",
+    "fixture_button_no_label_disabled": RESOURCE_PATH / "fixture" / "button_no_label_disabled.png",
+
+
     # Button confirm
     "fixture_button_confirm_normal_0.5": RESOURCE_PATH / "fixture" / "button_confirm_0_5.png",
     "fixture_button_confirm_hover_0.5": RESOURCE_PATH / "fixture" / "button_confirm_hover_0_5.png",
