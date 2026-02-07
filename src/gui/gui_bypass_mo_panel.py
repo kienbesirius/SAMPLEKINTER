@@ -272,6 +272,12 @@ class AppGUI:
 
             self._canvas.configure(bg=self.stand_by_color)
             if not self.listenport:
+                self.txt_entry_com_sfc.configure(state="normal")
+                self.txt_entry_mo.configure(state="normal")
+                self.txt_entry_laser_id.configure(state="normal")
+                self.txt_entry_panel_dsn.configure(state="normal")
+                self.txt_entry_panel_dsn.set("")
+
                 raise RuntimeError("ListenPort not initialized")
             dispatch = lambda fn: self.root.after(0, fn)
             ok, lines = self.listenport.send_and_collect(
@@ -373,7 +379,7 @@ class AppGUI:
                     pass
             return "break"
 
-        for other in (getattr(self, "txt_entry_com_sfc", None), getattr(self, "txt_entry_mo", None)):
+        for other in (getattr(self, "txt_entry_mo", None),):
             if not other:
                 continue
             try:
@@ -473,6 +479,11 @@ class AppGUI:
     def _trigger_send_panel_sn(self, *, panel_sn: str, reason: str) -> None:
         panel_sn = re.sub(r"[\r\n]+", "", panel_sn or "").strip()
         if not panel_sn:
+            self.txt_entry_com_sfc.configure(state="normal")
+            self.txt_entry_mo.configure(state="normal")
+            self.txt_entry_laser_id.configure(state="normal")
+            self.txt_entry_panel_dsn.configure(state="normal")
+            self.txt_entry_panel_dsn.set("")
             return
 
         try:
@@ -480,8 +491,18 @@ class AppGUI:
         except Exception:
             mo = ""
             self.txt_entry_panel_dsn.set("")
+            self.txt_entry_com_sfc.configure(state="normal")
+            self.txt_entry_mo.configure(state="normal")
+            self.txt_entry_laser_id.configure(state="normal")
+            self.txt_entry_panel_dsn.configure(state="normal")
+            self.txt_entry_panel_dsn.set("")
             return self._update_logs_panel("WO/MO trống, không thể gửi lệnh bypass.", "red")
         if not mo:
+            self.txt_entry_panel_dsn.set("")
+            self.txt_entry_com_sfc.configure(state="normal")
+            self.txt_entry_mo.configure(state="normal")
+            self.txt_entry_laser_id.configure(state="normal")
+            self.txt_entry_panel_dsn.configure(state="normal")
             self.txt_entry_panel_dsn.set("")
             return self._update_logs_panel("WO/MO trống, không thể gửi lệnh bypass.", "red")
 
@@ -494,6 +515,11 @@ class AppGUI:
         # Avoid accidental duplicate (e.g., Enter + idle firing close together)
         now = time.time()
         if cmd == self._panel_sn_last_sent_cmd and (now - float(self._panel_sn_last_sent_ts)) < 0.8:
+            self.txt_entry_com_sfc.configure(state="normal")
+            self.txt_entry_mo.configure(state="normal")
+            self.txt_entry_laser_id.configure(state="normal")
+            self.txt_entry_panel_dsn.configure(state="normal")
+            self.txt_entry_panel_dsn.set("")
             return
         self._panel_sn_last_sent_cmd = cmd
         self._panel_sn_last_sent_ts = now
@@ -501,6 +527,11 @@ class AppGUI:
         try:
             self._update_logs_panel(f"Trigger send ({reason}): {cmd}", "yellow")
         except Exception:
+            self.txt_entry_com_sfc.configure(state="normal")
+            self.txt_entry_mo.configure(state="normal")
+            self.txt_entry_laser_id.configure(state="normal")
+            self.txt_entry_panel_dsn.configure(state="normal")
+            self.txt_entry_panel_dsn.set("")
             pass
 
         # # Clear PanelSN for next scan and focus back
@@ -515,10 +546,20 @@ class AppGUI:
         try:
             self.root.after(0, lambda: self.txt_entry_panel_dsn.focus_set())
         except Exception:
+            self.txt_entry_com_sfc.configure(state="normal")
+            self.txt_entry_mo.configure(state="normal")
+            self.txt_entry_laser_id.configure(state="normal")
+            self.txt_entry_panel_dsn.configure(state="normal")
+            self.txt_entry_panel_dsn.set("")
             pass
 
         if not self.listenport:
             self._update_logs_panel("ListenPort chưa sẵn sàng (chưa mở COM).", "red")
+            self.txt_entry_com_sfc.configure(state="normal")
+            self.txt_entry_mo.configure(state="normal")
+            self.txt_entry_laser_id.configure(state="normal")
+            self.txt_entry_panel_dsn.configure(state="normal")
+            self.txt_entry_panel_dsn.set("")
             return
 
         self.send_to_com(cmd)
