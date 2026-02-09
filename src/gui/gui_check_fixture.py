@@ -25,6 +25,7 @@ from src.gui.widgets.fixture_circle_status import bind_fixture_circle_com_status
 from src.gui.widgets.paint_asset import bind_canvas_asset
 from src.gui.widgets.guide_panel import GuidePanel, GuideStep
 from src.gui.widgets.canvas_log_widget import bind_canvas_log_widget
+from src.utils.enable_startup import enable_startup, disable_startup, is_startup_enabled
 from src.gui.widgets.rect_panel import bind_center_rect_panel, CenterRectStyle
 from src.gui.fixture.fill_multiple_monitor import fullscreen_on_monitor, get_monitors, monitor_from_point
 from src.gui.fixture.get_fixture_port import get_fixture_port, parse_fixture_port_text
@@ -230,8 +231,8 @@ class SharedUIState:
 class AppGUI:
     dpi.set_dpi_awareness()
     from src.watchdog.watchdog_gui import ensure_watchdog_running, WD_PORT
-    wd_exe = app_dir() / "bin" / ("watchdog.exe" if sys.platform.startswith("win") else "watchdog")
-    ensure_watchdog_running(wd_exe, app_dir()/ "logs" / "watchdog")
+    # wd_exe = app_dir() / "bin" / ("watchdog.exe" if sys.platform.startswith("win") else "watchdog")
+    # ensure_watchdog_running(wd_exe, app_dir()/ "logs" / "watchdog")
     def create_extra_windows(self):
     
         for w in list(self.roots_extra):
@@ -293,6 +294,7 @@ class AppGUI:
     def __init__(self, root: tk.Tk):
         # Build log buffer
         self.is_admin = False
+        self.startup_enabled = True
         self.cfg_path = app_dir() / "config.ini"
         self.status_map = load_slot_status_from_ini(self.cfg_path)
 
@@ -395,6 +397,7 @@ class AppGUI:
             "force_stop": "fixture_stop_guide_240x240",
         }
 
+        self._broadcast_startup_state()
         # self.root.after(3000, self.send_to_com("?"))
         ### Example usage of slot status updateF
         # self.update_slot_status(slot_id=1, status="idle")
@@ -491,9 +494,9 @@ class AppGUI:
         # Create a Text line Powered by Bế Chí Kiên above the log panel
         credit_x_axis = sw - (self.assets["fixture_info_frame_bg"].width())
         credit_y_axis = sh - (self.assets["fixture_info_frame_bg"].height()) - 24
+        
         credit = canvas.create_text(credit_x_axis, credit_y_axis, text=("Powered by bechjkjen"), font=("Tektur", 12, "bold"), fill="#FFB14A", anchor="nw")
         credit_y_axis -= 24
-
         mode_oper = bind_canvas_text(
             root=win,
             canvas=canvas,
@@ -509,6 +512,25 @@ class AppGUI:
             anchor="nw",
             command=lambda w=win: self.show_admin_auth_dialog(win=w),
         )
+
+        credit_y_axis -= 24
+
+        startup_toggle = bind_canvas_text(
+            root=win,
+            canvas=canvas,
+            tag="startup_toggle",
+            x=credit_x_axis,
+            y=credit_y_axis,
+            text=("STARTUP: ON" if self.startup_enabled else "STARTUP: OFF"),
+            text_font=("Tektur", 12, "bold"),
+            fill=("#7CFF7C" if self.startup_enabled else "white"),
+            active_fill="#FFD24A",
+            disabled_fill="#CFCFCF",
+            cooldown_ms=1250,
+            anchor="nw",
+            command=(lambda w=win: self.toggle_startup(win=w)) if self.is_admin else None,
+        )
+        widgets["startup_toggle"] = startup_toggle
 
         fixture_dummy = bind_canvas_asset(
             root=win,
@@ -978,6 +1000,7 @@ class AppGUI:
                 # gate hover fx if supported
                 try:
                     slot.configure(is_admin=self.is_admin)
+                    self._broadcast_startup_state()
                 except Exception:
                     try:
                         setattr(slot, "is_admin", self.is_admin)
@@ -1888,3 +1911,52 @@ class AppGUI:
             self._task_finally_cb(_meta)
 
         self.send_to_com(case.cmd, on_start=self._task_start_cb, on_success=_ok, on_error=_err, on_finally=_finally, expect=case.expect, reject=None)
+
+    def _startup_label(self) -> str:
+        return "STARTUP: ON" if self.startup_enabled else "STARTUP: OFF"
+
+    def _broadcast_startup_state(self) -> None:
+        for w in self._iter_windows():
+            ws = self._get_widgets(w)
+            btn = ws.get("startup_toggle")
+            if not btn:
+                continue
+            try:
+                btn.configure(
+                    text=self._startup_label(),
+                    fill=("#7CFF7C" if self.startup_enabled else "white"),
+                    command=(lambda win=w: self.toggle_startup(win=win)) if self.is_admin else None,
+                )
+            except Exception:
+                pass
+
+    def toggle_startup(self, *, win: tk.Misc | None = None) -> None:
+        if not self.is_admin:
+            try:
+                self._update_logs_panel("[startup] Need ADMIN to change startup", "yellow")
+            except Exception:
+                pass
+            return
+
+        def _log(msg: str):
+            try:
+                self._update_logs_panel(msg, "yellow")
+            except Exception:
+                pass
+
+        if self.startup_enabled:
+            ok = disable_startup(log_callback=_log)
+        else:
+            ok = enable_startup(log_callback=_log)
+
+        # refresh state theo OS thật
+        self.startup_enabled = is_startup_enabled()
+        self._broadcast_startup_state()
+
+        try:
+            self._update_logs_panel(
+                f"[startup] {'ENABLED' if self.startup_enabled else 'DISABLED'}",
+                "green" if self.startup_enabled else "red",
+            )
+        except Exception:
+            pass
