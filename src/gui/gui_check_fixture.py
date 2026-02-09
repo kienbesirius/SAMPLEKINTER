@@ -1609,7 +1609,7 @@ class AppGUI:
         if "SENSOR TOP LEFT" in label:
             img = "guide_sensor_top_left"
             title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc trên trái ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
-            expect = re.compile(r"oky", re.I)
+            expect = re.compile(r"ok", re.I)
             ## TODO: CATCH patterns
             # expect = re.compile(r"\b(?:ok|pass(?:ed)?|success|done)\b", re.I)
         elif "SENSOR TOP RIGHT" in label:
