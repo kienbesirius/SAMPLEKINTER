@@ -6,7 +6,7 @@ import tkinter as tk
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Tuple, Literal, List
 import math
-
+from src.utils.config_go import choose_slot_font
 Command = Optional[Callable[[], None]]
 SlotStatus = Literal["idle", "testing", "pass", "fail", "stand_by", "item", "unknown"]
 
@@ -562,7 +562,7 @@ class FixtureCheckSlotTest:
             justify=text_justify,      # <-- align center multi-line
             tags=(self.tag, self.hit_tag, f"{self.tag}__text"),
         )
-
+        self._apply_auto_font(text)
 
         self._hover_fx_enabled = True
         self._hover_fx = _RectPulse(
@@ -631,7 +631,7 @@ class FixtureCheckSlotTest:
             status = "idle"  # type: ignore[assignment]
         self._status = status
 
-        key = self._status_to_key(status)
+        key = self._status_to_key(status, self.canvas.itemcget(self.text_id, "text"))
         
         self.canvas.itemconfig(self.img_id, image=self.assets[key])
 
@@ -735,7 +735,7 @@ class FixtureCheckSlotTest:
                 continue
         return False
 
-    def _status_to_key(self, status: SlotStatus) -> str:
+    def _status_to_key(self, status: SlotStatus, text= None) -> str:
         # map status -> base skin key
         if status == "testing":
             base = self.skins.testing
@@ -752,9 +752,52 @@ class FixtureCheckSlotTest:
         else:
             base = self.skins.idle
 
-        # auto scale if *_0.5 / *_0.75 exists
         return _pick_scaled_key(self.canvas, self.assets, base)
 
+
+    # 2) thêm helper auto-font (dựa theo bề ngang tile, không dùng canvas.winfo_width())
+    def _auto_pick_font(self, label: str) -> tuple:
+        s = (label or "").strip().replace("\n", " ")
+        words = [w for w in s.split(" ") if w]
+        max_len = max((len(w) for w in words), default=0)
+
+        # tile width: lưu từ init (xem phần dưới)
+        w = int(getattr(self, "_tile_w", 120))
+
+        # bucket theo tile size
+        if w <= 70:
+            base = 9
+            # chữ dài -> giảm
+            if max_len >= 8: base = 4
+            elif max_len == 7: base = 5
+            elif max_len == 6: base = 6
+            elif max_len == 5: base = 7
+            elif max_len == 4: base = 8
+        elif w <= 110:
+            base = 11
+            if max_len >= 8: base = 5
+            elif max_len == 7: base = 6
+            elif max_len == 6: base = 7
+            elif max_len == 5: base = 9
+            elif max_len == 4: base = 10
+        else:
+            base = 13
+            if max_len >= 8: base = 7
+            elif max_len == 7: base = 8
+            elif max_len == 6: base = 9
+            elif max_len == 5: base = 10
+            elif max_len == 4: base = 12
+
+        return ("Tektur", base, "bold")
+
+
+    def _apply_auto_font(self, label: str) -> None:
+        if not hasattr(self, "text_id"):
+            return
+        try:
+            self.canvas.itemconfig(self.text_id, font=self._auto_pick_font(label))
+        except Exception:
+            pass
     # ---------------------------
     # Event handlers
     # ---------------------------

@@ -164,6 +164,7 @@ ASSET_FILES = {
     "fixture_circle_dock_status_error": RESOURCE_PATH / "fixture" / "COM_STATUS_ERROR.png",
 
     # _0.5 _0_5
+    "fixture_text_comx_0.5": RESOURCE_PATH / "fixture" / "TEXT_COMX_0_5.png",
     "fixture_text_com999_0.5": RESOURCE_PATH / "fixture" / "TEXT_COMX_0_5.png",
     "fixture_text_com1_0.5": RESOURCE_PATH / "fixture" / "TEXT_COM1_0_5.png",
     "fixture_text_com2_0.5": RESOURCE_PATH / "fixture" / "TEXT_COM2_0_5.png",
@@ -184,6 +185,7 @@ ASSET_FILES = {
     "fixture_text_com17_0.5": RESOURCE_PATH / "fixture" / "TEXT_COM17_0_5.png",
     
     # _0.75 _0_75
+    "fixture_text_comx_0.75": RESOURCE_PATH / "fixture" / "TEXT_COMX_0_75.png",
     "fixture_text_com999_0.75": RESOURCE_PATH / "fixture" / "TEXT_COMX_0_75.png",
     "fixture_text_com1_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM1_0_75.png",
     "fixture_text_com2_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM2_0_75.png",
@@ -202,7 +204,8 @@ ASSET_FILES = {
     "fixture_text_com15_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM15_0_75.png",
     "fixture_text_com16_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM16_0_75.png",
     "fixture_text_com17_0.75": RESOURCE_PATH / "fixture" / "TEXT_COM17_0_75.png",
-
+    
+    "fixture_text_comx": RESOURCE_PATH / "fixture" / "TEXT_COMX.png",
     "fixture_text_com999": RESOURCE_PATH / "fixture" / "TEXT_COMX.png",
     "fixture_text_com1": RESOURCE_PATH / "fixture" / "TEXT_COM1.png",
     "fixture_text_com2": RESOURCE_PATH / "fixture" / "TEXT_COM2.png",

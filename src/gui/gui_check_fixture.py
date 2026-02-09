@@ -229,7 +229,9 @@ class SharedUIState:
 
 class AppGUI:
     dpi.set_dpi_awareness()
-
+    from src.watchdog.watchdog_gui import ensure_watchdog_running, WD_PORT
+    wd_exe = app_dir() / "bin" / ("watchdog.exe" if sys.platform.startswith("win") else "watchdog")
+    ensure_watchdog_running(wd_exe, app_dir()/ "logs" / "watchdog")
     def create_extra_windows(self):
     
         for w in list(self.roots_extra):
@@ -383,7 +385,7 @@ class AppGUI:
 
         self._refresh_gui()
 
-        self.install_close_lock(10)
+        self.install_close_lock(1)
 
         self.map_fixture = {
             "block_sensor_top_left": "fixture_sensor_top_left_guide_240x240",
@@ -437,8 +439,6 @@ class AppGUI:
             y = y0 + row * slot_gap
 
             text = self.fx_cfg.slot_text.get(i, "")
-            font = choose_slot_font(text)
-
             slot = bind_fixture_check_slot_test(
                 root=win,
                 canvas=canvas,
@@ -447,7 +447,7 @@ class AppGUI:
                 x=x, y=y,
                 status=self.status_map.get(i, "idle"),
                 text=text,
-                text_font=font,
+                text_font=self.tektur_font,
                 command=lambda idx=i, w=win: self.show_manual_config_command(win=w, slot_idx=idx),
                 is_admin=self.is_admin,
             )
