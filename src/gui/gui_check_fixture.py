@@ -34,7 +34,8 @@ from src.gui.fixture.listen_port import ListenPort
 from src.utils.config_go import load_fixture_cfg, choose_slot_font, reset_slot_status_section_to_idle, update_ini_slot_status, load_slot_status_from_ini, SlotStatus, _ALLOWED_STATUS, update_ini_fixture_section, update_ini_manual_slot_info
 from src.gui.widgets.dialog import ModalOverlay
 import tkinter.font as tkfont
-
+from src.watchdog.watchdog_gui import wd_register, wd_heartbeat, wd_complete
+from src.watchdog.watchdog_gui import ensure_watchdog_running_auto
 
 @dataclass
 class GuideCase:
@@ -230,9 +231,6 @@ class SharedUIState:
 
 class AppGUI:
     dpi.set_dpi_awareness()
-    from src.watchdog.watchdog_gui import ensure_watchdog_running, WD_PORT
-    # wd_exe = app_dir() / "bin" / ("watchdog.exe" if sys.platform.startswith("win") else "watchdog")
-    # ensure_watchdog_running(wd_exe, app_dir()/ "logs" / "watchdog")
     def create_extra_windows(self):
     
         for w in list(self.roots_extra):
@@ -281,11 +279,12 @@ class AppGUI:
 
                 # sw, sh = win.winfo_width(), win.winfo_height()
                 win._widgets = self._build_gui(win=win, canvas=canvas, sw=sw, sh=sh)
-                win.protocol("WM_DELETE_WINDOW", lambda w=win: self._guarded_close(w))
+                # win.protocol("WM_DELETE_WINDOW", lambda w=win: self._guarded_close(w))
 
-                # Nuốt Alt+F4 cho đúng target là cửa sổ này
-                win.bind("<Alt-KeyPress-F4>", lambda e, w=win: (self._guarded_close(w), "break"))
-                win.bind("<Alt-F4>",          lambda e, w=win: (self._guarded_close(w), "break"))
+                # # Nuốt Alt+F4 cho đúng target là cửa sổ này
+                # win.bind("<Alt-KeyPress-F4>", lambda e, w=win: (self._guarded_close(w), "break"))
+                # win.bind("<Alt-F4>",          lambda e, w=win: (self._guarded_close(w), "break"))
+                self._install_close_guard_for_window(win)
 
                 self.roots_extra.append(win)
             except Exception:
@@ -294,7 +293,7 @@ class AppGUI:
     def __init__(self, root: tk.Tk):
         # Build log buffer
         self.is_admin = False
-        self.startup_enabled = True
+        self.startup_enabled = is_startup_enabled()
         self.cfg_path = app_dir() / "config.ini"
         self.status_map = load_slot_status_from_ini(self.cfg_path)
 
@@ -387,7 +386,7 @@ class AppGUI:
 
         self._refresh_gui()
 
-        self.install_close_lock(1)
+        self.install_close_lock()
 
         self.map_fixture = {
             "block_sensor_top_left": "fixture_sensor_top_left_guide_240x240",
@@ -397,16 +396,118 @@ class AppGUI:
             "force_stop": "fixture_stop_guide_240x240",
         }
 
-        self._broadcast_startup_state()
-        # self.root.after(3000, self.send_to_com("?"))
-        ### Example usage of slot status updateF
-        # self.update_slot_status(slot_id=1, status="idle")
-        # self.update_slot_status(slot_id=6, status="testing")
-        # self.update_slot_status(slot_id=7, status="pass")
-        # self.update_slot_status(slot_id=12, status="fail")
-        # # reset slot status after 5s
-        
-    
+        for win in self._iter_windows():
+            self.toggle_startup(win=win)
+
+        self._wd_closing = False
+        self._allow_app_exit = False
+        self._wd_run_id = f"{os.getpid()}-{int(time.time())}"
+
+        # register + start heartbeat (2s/lần, watchdog timeout 10s)
+        self._wd_do_register()
+        self._wd_start_heartbeat(interval_ms=2000)
+
+    def _wd_do_register(self) -> None:
+        pid = os.getpid()
+        if getattr(sys, "frozen", False):
+            argv = [sys.executable, *sys.argv[1:]]
+        else:
+            argv = [sys.executable, os.path.abspath(sys.argv[0]), *sys.argv[1:]]
+        cwd = os.getcwd()
+
+        def _after_ensure(_result, _meta):
+            ok = wd_register(pid=pid, run_id=self._wd_run_id, app_argv=argv, cwd=cwd)
+            self._update_logs_panel("[watchdog] registered" if ok else "[watchdog] register failed",
+                                    "green" if ok else "yellow")
+
+        self.io_taskq.submit(
+            func=ensure_watchdog_running_auto,
+            kwargs={"log_dir": app_dir() / "logs" / "watchdog", "log_callback": self._wd_log},
+            name="Ensure Watchdog Running",
+            on_start=self._task_start_cb,
+            on_success=_after_ensure,
+            on_error=self._task_error_cb,
+            on_finally=self._task_finally_cb,
+            on_progress=self._task_progress_cb,
+        )
+
+    # def _wd_do_register(self) -> None:
+    #     try:
+
+    #         self._ensure_watchdog_running()
+
+    #         pid = os.getpid()
+
+    #         # argv để watchdog spawn lại: ưu tiên sys.executable (exe khi frozen)
+    #         # argv = [sys.executable] + sys.argv[1:]
+
+    #         if getattr(sys, "frozen", False):
+    #             argv = [sys.executable, *sys.argv[1:]]              # exe đã là app
+    #         else:
+    #             argv = [sys.executable, os.path.abspath(sys.argv[0]), *sys.argv[1:]]  # python + run.py
+
+    #         cwd = os.getcwd()
+
+    #         ok = wd_register(pid=pid, run_id=self._wd_run_id, app_argv=argv, cwd=cwd)
+    #         if ok:
+    #             self._update_logs_panel("[watchdog] registered", "green")
+    #         else:
+    #             self._update_logs_panel("[watchdog] register failed", "yellow")
+    #     except Exception as e:
+    #         try:
+    #             self._update_logs_panel(f"[watchdog] register exception: {e}", "red")
+    #         except Exception:
+    #             pass
+
+    def _wd_start_heartbeat(self, interval_ms: int = 2000) -> None:
+        self._wd_hb_ms = int(interval_ms)
+
+        def _tick():
+            if self._wd_closing:
+                return
+            try:
+                wd_heartbeat(pid=os.getpid(), run_id=self._wd_run_id)
+            except Exception:
+                pass
+            try:
+                self.root.after(self._wd_hb_ms, _tick)
+            except Exception:
+                pass
+
+        try:
+            self.root.after(self._wd_hb_ms, _tick)
+        except Exception:
+            pass
+
+    def _wd_send_complete(self) -> None:
+        try:
+            wd_complete(pid=os.getpid(), run_id=self._wd_run_id)
+        except Exception:
+            pass
+
+    # IMPORTANT: bypass close-guard when app closes by itself
+    def _shutdown_app_now(self) -> None:
+        self._wd_closing = True
+        self._allow_app_exit = True
+
+        # destroy extra windows first
+        try:
+            for w in list(getattr(self, "roots_extra", [])):
+                try:
+                    w.destroy()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        try:
+            self.root.destroy()
+        except Exception:
+            try:
+                self.root.quit()
+            except Exception:
+                pass
+
     # TODO: Create UI for testing fixture
     def _build_gui(self, *, win: tk.Misc, canvas: tk.Canvas, sw: int, sh: int):
         # layout
@@ -496,6 +597,7 @@ class AppGUI:
         credit_y_axis = sh - (self.assets["fixture_info_frame_bg"].height()) - 24
         
         credit = canvas.create_text(credit_x_axis, credit_y_axis, text=("Powered by bechjkjen"), font=("Tektur", 12, "bold"), fill="#FFB14A", anchor="nw")
+        
         credit_y_axis -= 24
         mode_oper = bind_canvas_text(
             root=win,
@@ -514,7 +616,6 @@ class AppGUI:
         )
 
         credit_y_axis -= 24
-
         startup_toggle = bind_canvas_text(
             root=win,
             canvas=canvas,
@@ -532,6 +633,25 @@ class AppGUI:
         )
         widgets["startup_toggle"] = startup_toggle
 
+        credit_y_axis -= 24
+        admin_stop = bind_canvas_text(
+            root=win,
+            canvas=canvas,
+            tag="admin_stop",
+            x=credit_x_axis,
+            y=credit_y_axis,
+            text=("ADMIN - TERMINATE"),
+            text_font=("Tektur", 12, "bold"),
+            fill=("#E1163F"),
+            active_fill="#FFD24A",
+            disabled_fill="#CFCFCF",
+            cooldown_ms=1250,
+            anchor="nw",
+            command=(lambda w=win: self.admin_terminate(win=w)),
+        )
+
+        widgets["admin_stop"] = admin_stop
+
         fixture_dummy = bind_canvas_asset(
             root=win,
             canvas=canvas,
@@ -544,22 +664,6 @@ class AppGUI:
         )
 
         widgets[f"fixture_dummy"] = fixture_dummy
-        # # Bind button
-        # send_test_cmd_btn = bind_canvas_button(
-        #     root=win,
-        #     canvas=canvas,
-        #     assets=self.assets,
-        #     normal_status="fixture_button_confirm_normal",
-        #     hover_status="fixture_button_confirm_hover",
-        #     active_status="fixture_button_confirm_pressed",
-        #     disabled_status="fixture_button_confirm_disabled",
-        #     tag="send_test_cmd_button",
-        #     x=x+400, y=y,
-        #     text="",
-        #     command=lambda w=win: self.show_reset_confirm(w),
-        # )
-        # widgets["send_test_cmd_button"] = send_test_cmd_btn
-        #### BUTTON CHECK OKAY!!!
         
         widgets["credit"] = credit
         widgets["mode_oper"] = mode_oper
@@ -612,16 +716,98 @@ class AppGUI:
         return widgets
     
 
+    def _fixture_dummy_key_for_case(self, case: GuideCase | None) -> str:
+        if not case:
+            return "fixture_240x240"
+
+        label = (case.slot_label or "").upper()
+        cmd = (case.cmd or "").upper()
+
+        if "SENSOR TOP LEFT" in label:
+            return self.map_fixture.get("block_sensor_top_left", "fixture_240x240")
+        if "SENSOR TOP RIGHT" in label:
+            return self.map_fixture.get("block_sensor_top_right", "fixture_240x240")
+        if "SENSOR BOT LEFT" in label or "SENSOR BOTTOM LEFT" in label:
+            return self.map_fixture.get("block_sensor_bottom_left", "fixture_240x240")
+        if "SENSOR BOT RIGHT" in label or "SENSOR BOTTOM RIGHT" in label:
+            return self.map_fixture.get("block_sensor_bottom_right", "fixture_240x240")
+
+        if "FORCE STOP" in cmd:
+            return self.map_fixture.get("force_stop", "fixture_240x240")
+
+        return "fixture_240x240"
+
+
+    def _set_fixture_dummy_key_all(self, key: str) -> None:
+        for w in self._iter_windows():
+            ws = self._get_widgets(w)
+            fd = ws.get("fixture_dummy")
+            if not fd:
+                continue
+            try:
+                fd.configure(key=key)   # <-- đổi ảnh (auto scale _0.5/_0.75 nếu có)
+            except Exception:
+                pass
+
     def _guide_done(self):
         # Step cuối xong thì bạn làm gì tuỳ ý:
         self.reset_slot_status()
         self._update_logs_panel("Guide completed.", "green")
+        self._update_logs_panel("Guide completed.", "green")
+
+        # 1) notify watchdog
+        self._wd_send_complete()
+
+        self.io_taskq.submit(
+            func=self._shutdown_app_now,
+            kwargs={},
+            name="shutdown",
+            on_start=self._task_start_cb,
+            on_success=None,
+            on_error=None,
+            on_finally=None,
+            on_progress=self._task_progress_cb,
+        )
 
     def _flow_gui(self):
         pass
 
     def _draw_guide(self, canvas: tk.Canvas):
         pass 
+    
+    def admin_terminate(self, win=None):
+        if not getattr(self, "is_admin", False):
+            return
+
+        # chặn mọi callback UI (resize/after/pump...)
+        self._is_shutting_down = True
+
+        # (optional) nếu bạn có after job id của guide resize/pump thì cancel ở đây
+
+        for w in self._iter_windows():
+            for fn in (
+                lambda: w.attributes("-topmost", False),
+                lambda: w.attributes("-fullscreen", False),
+            ):
+                try: fn()
+                except Exception: pass
+            try: w.state("normal")
+            except Exception: pass
+            try: w.update_idletasks()
+            except Exception: pass
+            # đừng gọi w.update() lúc đang shutdown (nó kích hoạt thêm event)
+            # try: w.update()
+            # except Exception: pass
+
+        # gọi guide_done sau khi đã set flag
+        try:
+            self._guide_done()
+        except Exception:
+            pass
+
+        # rồi off app luôn (nếu bạn muốn terminate thật)
+        # self._kill_app_windows()
+
 
     def show_reset_confirm(self, win: tk.Misc | None = None):
         win = win or self.root
@@ -1465,23 +1651,22 @@ class AppGUI:
         if status.lower() == "ok":
             self._update_logs_panel(f"{name} ~ END", "yellow")
 
-    # Close all windows
     def _close_all_windows(self, source_win: tk.Misc | None = None):
-        if self._is_close_locked():
-            self._emit_guard(f"[guard] Close bị chặn. Còn ~{self._remaining_lock():.1f}s")
+        ok, reason = self._can_close_now()
+        if not ok:
+            self._emit_guard(f"[guard] Block close: {reason}")
             return
-        # chống re-entrant (vì destroy root sẽ destroy các toplevel, callback có thể bị gọi chồng)
+
+        # chống re-entrant
         if getattr(self, "_is_closing_all", False):
             return
         self._is_closing_all = True
 
-        # (optional) cleanup runner/process nếu bạn có stop/terminate
         try:
             self.runner.stop_all()
         except Exception:
             pass
 
-        # destroy tất cả cửa sổ con trước (optional)
         for w in list(self.roots_extra):
             try:
                 if w.winfo_exists():
@@ -1490,12 +1675,12 @@ class AppGUI:
                 pass
         self.roots_extra.clear()
 
-        # destroy root (Tk sẽ tự kéo theo mọi Toplevel còn lại)
         try:
             if self.root.winfo_exists():
                 self.root.destroy()
         except Exception:
             pass
+
 
     def _emit_guard(self, msg: str):
         try:
@@ -1503,16 +1688,135 @@ class AppGUI:
         except Exception:
             print(msg)
 
-    def install_close_lock(self, seconds: float = 10.0):
-        self._close_lock_until = time.monotonic() + float(seconds)
+    def _iter_available_slots_and_states(self) -> List[Tuple[int, str]]:
+        """
+        Slot cần check = slot có SLOT_TEST (fx_cfg.slot_text[slot] != "")
+        Bỏ qua slot status == 'idle' (slot không có gì để check / không active).
+        Nguồn status lấy từ self.status_map (được reload từ load_slot_status_from_ini).
+        """
+        # 1) load fixture cfg (SLOT_TEST)
+        fx = getattr(self, "fx_cfg", None)
+        if fx is None:
+            try:
+                fx = self.fx_cfg = load_fixture_cfg(self.cfg_path)
+            except Exception:
+                return []  # không đọc được config => coi như không có gì cần check
 
-        # lock cả root
-        self.root.protocol("WM_DELETE_WINDOW", lambda: self._guarded_close(self.root))
-        self.root.bind_all("<Alt-KeyPress-F4>", lambda e: (self._guarded_close(self._focused_window()), "break"), add="+")
-        self.root.bind_all("<Alt-F4>",         lambda e: (self._guarded_close(self._focused_window()), "break"), add="+")
+        # 2) status map
+        sm = getattr(self, "status_map", None)
+        if not isinstance(sm, dict):
+            try:
+                sm = self.status_map = load_slot_status_from_ini(self.cfg_path)
+            except Exception:
+                sm = {}
 
-        # mở khóa sau 10s
-        self.root.after(int(seconds * 1000), self._unlock_close_lock)
+        out: List[Tuple[int, str]] = []
+        for slot_id in range(1, 13):
+            # chỉ check slot có SLOT_TEST
+            label = (fx.slot_text.get(slot_id, "") or "").strip()
+            if not label:
+                continue
+
+            st = (sm.get(slot_id, "idle") or "idle")
+            stn = _norm_state(st)
+
+            # bỏ qua idle đúng yêu cầu
+            if stn == "idle":
+                continue
+
+            out.append((slot_id, st))
+        return out
+
+
+
+    # --- 3) điều kiện cho phép đóng ---
+    def _can_close_now(self) -> Tuple[bool, str]:
+        """
+        Rule:
+        - Nếu chưa có slot info -> cho tắt (True)
+        - Nếu có slot đang TESTING -> chặn
+        - Nếu có slot FAIL -> chặn
+        - Còn lại (tất cả IDLE hoặc PASS) -> cho tắt
+        """
+        pairs = self._iter_available_slots_and_states()
+        if not pairs:
+            return True, "no slots / not initialized"
+
+        testing = [sid for sid, st in pairs if _is_testing(st)]
+        failing = [sid for sid, st in pairs if _is_fail(st)]
+        idle = [sid for sid, st in pairs if _is_idle(st)]
+
+        if testing:
+            return False, f"slots testing: {testing}"
+        if failing:
+            return False, f"slots failed: {failing}"
+        if idle:
+            return False, f"slots idle: {idle}"
+
+        # nếu muốn “phải PASS hết” (không tính IDLE) thì bật check dưới:
+        # not_pass = [sid for sid, st in pairs if not _is_pass(st)]
+        # if not_pass:
+        #     return False, f"slots not passed: {not_pass}"
+
+        return True, "all idle/pass"
+
+
+    # --- 4) guarded close mới ---
+    def _guarded_close_by_slots(self, win):
+
+        if getattr(self, "_allow_app_exit", False):
+            try:
+                win.destroy()
+            except Exception:
+                pass
+            return
+        
+        ok, reason = self._can_close_now()
+        if ok:
+            try:
+                win.destroy()
+            except Exception:
+                try:
+                    self.root.destroy()
+                except Exception:
+                    pass
+            return
+
+        # chặn đóng + log/notify
+        try:
+            self._update_logs_panel(f"[guard] Block close: {reason}", "yellow")
+        except Exception:
+            print("[guard] Block close:", reason)
+
+        # nếu bạn có dialog canvas đẹp thì gọi ở đây (tùy project)
+        # self.show_toast("Không thể tắt khi đang TESTING/FAIL", color="yellow")
+
+
+    # --- 5) install_close_lock: giờ là install guard theo slot ---
+    def install_close_lock(self):
+        
+        # apply cho root + toàn bộ extra windows
+        for w in self._iter_windows():
+            self._install_close_guard_for_window(w)
+
+
+    def _install_close_guard_for_window(self, win: tk.Misc):
+        win.protocol("WM_DELETE_WINDOW", lambda w=win: self._close_all_windows(w))
+
+        # override (không add="+") để đè bind cũ trong create_extra_windows
+        win.bind("<Alt-KeyPress-F4>", lambda e, w=win: (self._close_all_windows(w), "break"))
+        win.bind("<Alt-F4>",          lambda e, w=win: (self._close_all_windows(w), "break"))
+
+    # def install_close_lock(self, seconds: float = 10.0):
+    #     self._close_lock_until = time.monotonic() + float(seconds)
+
+    #     # lock cả root
+    #     self.root.protocol("WM_DELETE_WINDOW", lambda: self._guarded_close(self.root))
+    #     self.root.bind_all("<Alt-KeyPress-F4>", lambda e: (self._guarded_close(self._focused_window()), "break"), add="+")
+    #     self.root.bind_all("<Alt-F4>",         lambda e: (self._guarded_close(self._focused_window()), "break"), add="+")
+
+    #     # mở khóa sau 10s
+    #     self.root.after(int(seconds * 1000), self._unlock_close_lock)
 
     def _unlock_close_lock(self):
         self._close_lock_until = 0.0
@@ -1552,6 +1856,8 @@ class AppGUI:
     def _init_guide_flow(self):
         # trạng thái luồng guide (điều khiển theo slot, retry tối đa)
         self._guide_busy: bool = False
+        self._guide_done_mode: str = "restart"  # "exit" | "restart"
+
         self._guide_running: bool = False
         self._guide_max_attempts: int = 3
 
@@ -1654,6 +1960,12 @@ class AppGUI:
             title = f"[Slot{slot_id}] Hãy dùng công cụ che SENSOR ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
             expect = re.compile(r"ok", re.I)
 
+        elif "STOP" in label or "FORCE STOP" in label:
+            img = "fixture_stop_guide_240x240"
+            title = f"[Slot{slot_id}] Hãy nhấn nút FORCE STOP - DỪNG KHẨN CẤP.\nBấm xác nhận để kiểm tra!"
+            expect = re.compile(r"\b(?:not\s+ok|fail(?:ed)?|ng|error|timeout|EMC|emc|STOPPED)\b", re.I)
+            # expect = re.compile(r"OK", re.I)
+
         return GuideCase(
             slot_id=slot_id,
             slot_label=label,
@@ -1686,6 +1998,22 @@ class AppGUI:
 
         return plan
 
+
+    def _guide_patch_step_all(self, idx: int, *, title=None, image_key=None, confirm_text=None):
+        for gp in self._iter_guide_panels():
+            try:
+                if not gp.steps:
+                    continue
+                i = max(0, min(int(idx), len(gp.steps) - 1))
+                st = gp.steps[i]
+                gp.steps[i] = type(st)(
+                    title=title if title is not None else st.title,
+                    image_key=image_key if image_key is not None else st.image_key,
+                    confirm_text=confirm_text if confirm_text is not None else st.confirm_text,
+                )
+            except Exception:
+                pass
+
     def _guide_build_steps(self, plan: Sequence[GuideCase]) -> list[GuideStep]:
         steps: list[GuideStep] = []
 
@@ -1708,11 +2036,11 @@ class AppGUI:
                 )
             )
 
-        # done step (dùng cho cả PASS ALL hoặc FAIL FINAL)
+        # # done step (dùng cho cả PASS ALL hoặc FAIL FINAL)
         steps.append(
             GuideStep(
                 title="Kết thúc. Bấm BẮT ĐẦU LẠI để chạy lại.",
-                image_key="fixture_240x240",
+                image_key="fixture_fail_to_check_240x240",
                 confirm_text="BẮT ĐẦU LẠI",
             )
         )
@@ -1732,6 +2060,7 @@ class AppGUI:
                 pass
 
     def _guide_reset(self) -> None:
+        self.reset_slot_status()
         self._guide_busy = False
         self._guide_running = False
         self._guide_plan = []
@@ -1745,6 +2074,10 @@ class AppGUI:
     def _guide_start_run(self) -> None:
         # rebuild plan + steps từ config mỗi lần start
         self._guide_plan = self._guide_build_plan()
+
+        first_case = self._guide_plan[0]
+        self._set_fixture_dummy_key_all(self._fixture_dummy_key_for_case(first_case))
+
         self._guide_attempts = {c.slot_id: 0 for c in self._guide_plan}
         steps = self._guide_build_steps(self._guide_plan)
 
@@ -1773,6 +2106,31 @@ class AppGUI:
             gp = self.widgets_main.get("guide")
         return gp
 
+
+    def _slot_display_name(self, slot_id: int) -> str:
+        # 1) ưu tiên từ fixture_cfg (config.ini)
+        try:
+            cfg = getattr(self, "fixture_cfg", None)
+            if cfg and getattr(cfg, "slot_text", None):
+                v = cfg.slot_text.get(int(slot_id))
+                if v and str(v).strip():
+                    return str(v).strip()
+        except Exception:
+            pass
+
+        # 2) fallback: nếu self.slot_text dict tồn tại
+        try:
+            d = getattr(self, "slot_text", None)
+            if isinstance(d, dict):
+                v = d.get(int(slot_id))
+                if v and str(v).strip():
+                    return str(v).strip()
+        except Exception:
+            pass
+
+        # 3) cuối cùng: mặc định
+        return f"SLOT{slot_id}"
+
     def _on_guide_confirm(self, step_idx: int, step):
         # Check self.com_status is exists and listening
         if not hasattr(self, "com_status") or self.com_status != "listening":
@@ -1800,16 +2158,20 @@ class AppGUI:
             self._guide_start_run()
             return
 
-        # done step => restart
         done_idx = len(self._guide_plan) + 1
         if step_idx == done_idx:
-            self._guide_done()
+            # QUYẾT ĐỊNH BẰNG STATE, KHÔNG DỰA VÀO step.confirm_text
+            if getattr(self, "_guide_done_mode", "restart") == "exit":
+                self._guide_done()   # gửi complete + đóng app
+                return
+
+            # restart
             self._guide_reset()
             return
 
         # nếu user click lệch step (multi-window), kéo về step hiện tại
         if self._guide_running and step_idx != self._guide_current_step:
-            self._guide_goto_all(self._guide_current_step)
+            # self._guide_goto_all(self._guide_current_step)
             return
 
         # --- slot step ---
@@ -1848,14 +2210,23 @@ class AppGUI:
 
                 # nếu hết slot => done
                 if step_idx >= len(self._guide_plan):
+                    self._guide_done_mode = "exit"
                     self._guide_running = False
                     self._guide_current_step = done_idx
                     self._guide_goto_all(done_idx)
-                    self._guide_set_content_all(
+                    self._guide_patch_step_all(
+                        done_idx,
                         title="PASS toàn bộ slot. Fixture OK.",
-                        image_key="fixture_240x240",
+                        image_key="fixture_pass_guide_240x240",
                         confirm_text="Thoát",
                     )
+                    self._guide_set_content_all(
+                        title="PASS toàn bộ slot. Fixture OK.",
+                        image_key="fixture_pass_guide_240x240",
+                        confirm_text="Thoát",
+                    )
+                    self._set_fixture_dummy_key_all("fixture_pass_guide_240x240")
+                    self._guide_goto_all(done_idx)
                     return
 
                 # move next slot
@@ -1863,7 +2234,7 @@ class AppGUI:
                 next_case = self._guide_plan[next_step - 1]
                 self._guide_current_step = next_step
                 self._guide_goto_all(next_step)
-
+                self._set_fixture_dummy_key_all(self._fixture_dummy_key_for_case(next_case))
                 # set TESTING cho slot tiếp theo
                 self.update_slot_status(next_case.slot_id, "testing")
                 # self.reset_slot_status()
@@ -1875,16 +2246,25 @@ class AppGUI:
 
             if att >= self._guide_max_attempts:
                 # FAIL FINAL => kết thúc while
+                self._guide_done_mode = "restart"
                 self.update_slot_status(slot_id, "fail")
                 # self.reset_slot_status()
                 self._guide_running = False
                 self._guide_current_step = done_idx
                 self._guide_goto_all(done_idx)
-                self._guide_set_content_all(
-                    title=f"FAIL FINAL tại Slot{slot_id} ({att}/{self._guide_max_attempts}). Dừng kiểm tra.",
-                    image_key="fixture_240x240",
+                self._guide_patch_step_all(
+                    done_idx,
+                    title=f"FAIL FINAL tại Slot{slot_id} ({att}/{self._guide_max_attempts}). Dừng kiểm tra.\nLý do thất bại: Tại ô thứ {slot_id} - {self._slot_display_name()}",
+                    image_key="fixture_fail_to_check_240x240",
                     confirm_text="BẮT ĐẦU LẠI",
                 )
+                self._guide_set_content_all(
+                    title=f"FAIL FINAL tại Slot{slot_id} ({att}/{self._guide_max_attempts}). Dừng kiểm tra.\nLý do thất bại: Tại ô thứ {slot_id} - {self._slot_display_name()}",
+                    image_key="fixture_fail_to_check_240x240",
+                    confirm_text="BẮT ĐẦU LẠI",
+                )
+                self._set_fixture_dummy_key_all("fixture_fail_to_check_240x240")
+                self._guide_goto_all(done_idx)
                 return
 
             # fail nhưng cho retry => slot vẫn TESTING, chờ user confirm lần nữa
@@ -1960,3 +2340,60 @@ class AppGUI:
             )
         except Exception:
             pass
+    
+    def _wd_log(self, msg: str):
+        # nếu chưa có logs panel thì print; nếu có thì push vào log panel
+        try:
+            self._update_logs_panel(f"[watchdog] {msg}", "yellow")
+        except Exception:
+            print("[watchdog]", msg)
+    
+    def _ensure_watchdog_running(self):
+        # Run ensure watchdog in io_taskq
+        self.io_taskq.submit(
+            func=ensure_watchdog_running_auto,
+            kwargs={
+                "log_dir": app_dir() / "logs" / "watchdog",
+                "log_callback": self._wd_log,
+            },
+            name="Ensure Watchdog Running",
+            on_start=self._task_start_cb,
+            on_success=lambda result, meta: self._task_success_cb(result, meta),
+            on_error=self._task_error_cb,
+            on_finally=self._task_finally_cb,
+            on_progress=self._task_progress_cb,
+        )
+
+
+# --- 1) helper normalize trạng thái ---
+def _norm_state(s: Any) -> str:
+    if s is None:
+        return ""
+    # enum -> name/value
+    for attr in ("name", "value"):
+        if hasattr(s, attr):
+            try:
+                s = getattr(s, attr)
+                break
+            except Exception:
+                pass
+    return str(s).strip().lower()
+
+_PASS = {"pass", "passed", "ok", "success"}
+_FAIL = {"fail", "failed", "ng", "error"}
+_TESTING = {"testing", "running", "busy", "inprogress", "in_progress"}
+_IDLE = {"idle", "item", "stand_by", "standby"}  # giữ nếu bạn cần dùng sau
+
+def _is_pass(s: Any) -> bool:
+    return _norm_state(s) in _PASS
+
+def _is_idle(s: Any) -> bool:
+    return _norm_state(s) in _IDLE
+
+
+def _is_fail(s: Any) -> bool:
+    return _norm_state(s) in _FAIL
+
+def _is_testing(s: Any) -> bool:
+    return _norm_state(s) in _TESTING
+

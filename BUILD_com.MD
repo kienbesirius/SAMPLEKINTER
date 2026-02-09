@@ -4,6 +4,9 @@
 sudo socat -d -d   pty,link=/dev/ttyUSB4,raw,echo=0,perm=0666   pty,link=/dev/ttyUSB3,raw,echo=0,perm=0666
 
 
+sudo socat -d -d   pty,link=/dev/ttyCOM8,raw,echo=0,perm=0666   pty,link=/dev/ttyCOM7,raw,echo=0,perm=0666
+
+
 sudo stty -F /dev/ttyUSB4 9600 raw -echo
 sudo stty -F /dev/ttyUSB3 9600 raw -echo
 ```

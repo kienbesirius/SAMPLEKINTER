@@ -2,6 +2,23 @@ import argparse, json, os, socket, threading, time, sys, platform, subprocess
 from pathlib import Path
 import logging
 from logging.handlers import RotatingFileHandler
+# --- add imports ---
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+import json
+from src.utils.terminal_no_popup_cmd_kwargs import no_popup_kwargs, build_launch_cmd
+
+
+@dataclass
+class ScheduleCfg:
+    # 06:00 và 18:00 (sáng/tối) = 12h một lần
+    times: list[tuple[int, int]] = None
+    heartbeat_timeout_s: float = 10.0
+    restart_cooldown_s: float = 2.0
+
+    def __post_init__(self):
+        if self.times is None:
+            self.times = [(6, 0), (18, 0)]
 
 def is_windows() -> bool:
     return platform.system().lower().startswith("win")
@@ -28,22 +45,94 @@ def pid_exists(pid: int) -> bool:
         except Exception:
             return False
 
-def spawn_app(app_argv: list[str], cwd: str | None):
-    if not app_argv:
-        return
-    kwargs = {
-        "cwd": cwd or None,
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "close_fds": True,
-    }
-    if is_windows():
-        CREATE_NEW_PROCESS_GROUP = 0x00000200
-        DETACHED_PROCESS = 0x00000008
-        CREATE_NO_WINDOW = 0x08000000
-        kwargs["creationflags"] = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
-    subprocess.Popen(app_argv, **kwargs)
+
+def spawn_detached(
+    app_argv: list[str],
+    *,
+    cwd: str | None = None,
+    env: dict | None = None,
+    log_path: str | None = None,
+) -> subprocess.Popen | None:
+    full_cmd, env = build_launch_cmd(app_argv, env=env)
+    if not full_cmd:
+        return None
+
+    pop = no_popup_kwargs()
+
+    # watchdog nên redirect log -> file (tránh PIPE)
+    stdout = stderr = None
+    log_fh = None
+    if log_path:
+        Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+        log_fh = open(log_path, "a", encoding="utf-8", buffering=1)
+        stdout = log_fh
+        stderr = subprocess.STDOUT
+
+    try:
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
+        
+        p = subprocess.Popen(
+            full_cmd,
+            cwd=cwd or None,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout if stdout is not None else subprocess.DEVNULL,
+            stderr=stderr if stderr is not None else subprocess.DEVNULL,
+            text=True,
+            start_new_session=True,   # Linux detach khỏi watchdog
+            shell=False,
+            **pop,
+        )
+        return p
+    finally:
+        # KHÔNG close log_fh ở đây nếu bạn muốn child tiếp tục ghi.
+        # Nhưng nếu bạn dùng DEVNULL thì thôi.
+        # Với file handle: thường vẫn ok để giữ mở trong watchdog process.
+        pass
+
+def spawn_app(app_argv: list[str], cwd: str | None, *, log_dir: Path, embedded_python: str | None = None):
+    env = os.environ.copy()
+    if embedded_python:
+        env["SLOTHCSV_PYTHON"] = str(embedded_python)
+
+    full_cmd, env = build_launch_cmd(app_argv, env=env)
+
+    # log spawn
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "app_spawn.log"
+    # out = open(log_path, "a", encoding="utf-8", buffering=1)
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    with open(log_path, "a", encoding="utf-8", buffering=1) as out:
+        kwargs = {
+            "cwd": cwd or None,
+            "env": env,
+            "stdin": subprocess.DEVNULL,
+            "stdout": out,
+            "stderr": subprocess.STDOUT,
+            "text": True,
+            "bufsize": 1,
+            "shell": False,
+            "start_new_session": True,
+        }
+        kwargs.update(no_popup_kwargs())
+        subprocess.Popen(full_cmd, **kwargs)
+    # kwargs = {
+    #     "cwd": cwd or None,
+    #     "env": env,
+    #     "stdin": subprocess.DEVNULL,
+    #     "stdout": out,
+    #     "stderr": subprocess.STDOUT,
+    #     "text": True,
+    #     "bufsize": 1,
+    #     "shell": False,
+    #     "start_new_session": True,
+    # }
+    # kwargs.update(no_popup_kwargs())
+
+    # subprocess.Popen(full_cmd, **kwargs)
+
 
 class Watchdog:
     def __init__(self, port: int, log_dir: Path):
@@ -57,6 +146,30 @@ class Watchdog:
 
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self._setup_log()
+
+        self.cfg = ScheduleCfg()
+        self.mode = "GUARD"     # "GUARD" | "SCHEDULE"
+        self.completed = False
+
+        self.target_run_id = ""
+        self.last_heartbeat_ts = 0.0
+        self.last_restart_ts = 0.0
+        self.next_run_ts = 0.0
+        self.target_python: str | None = None
+
+        self._recalc_next_run()
+
+
+    def _recalc_next_run(self) -> None:
+        """Next schedule time based on local time."""
+        now = datetime.now()
+        cands = []
+        for hh, mm in self.cfg.times:
+            dt = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+            if dt <= now:
+                dt += timedelta(days=1)
+            cands.append(dt)
+        self.next_run_ts = min(cands).timestamp() if cands else (time.time() + 12*3600)
 
     def _setup_log(self):
         self.logger = logging.getLogger("watchdog")
@@ -111,6 +224,58 @@ class Watchdog:
         cmd = (payload.get("cmd") or "").lower()
 
         if cmd == "ping":
+            # giữ tương thích (không dùng để monitor)
+            return "OK"
+
+        if cmd == "heartbeat":
+            pid = int(payload.get("pid") or 0)
+            run_id = str(payload.get("run_id") or "")
+            with self._lock:
+                # chỉ nhận heartbeat đúng phiên
+                if self.target_run_id and run_id and run_id != self.target_run_id:
+                    return "OK"
+                if pid > 0 and self.target_pid == 0:
+                    self.target_pid = pid
+                self.last_heartbeat_ts = time.time()
+            return "OK"
+
+        if cmd == "complete":
+            pid = int(payload.get("pid") or 0)
+            run_id = str(payload.get("run_id") or "")
+            self.logger.info(f"received COMPLETE pid={pid} run_id={run_id}")
+
+            with self._lock:
+                self.completed = True
+                self.mode = "SCHEDULE"
+                # clear current target so watchdog won't restart immediately
+                self.target_pid = 0
+                self.target_run_id = ""
+                self.last_heartbeat_ts = 0.0
+                self._recalc_next_run()
+
+            return "OK"
+
+        if cmd == "register":
+            pid = int(payload.get("pid") or 0)
+            argv = payload.get("app_argv") or []
+            cwd = payload.get("cwd") or None
+            run_id = str(payload.get("run_id") or "")
+
+            py = payload.get("python") or payload.get("embedded_python") or None
+
+            with self._lock:
+                self.target_pid = pid
+                self.target_argv = list(argv) if isinstance(argv, list) else []
+                self.target_cwd = str(cwd) if cwd else None
+                self.target_run_id = run_id
+                self.target_python = str(py) if py else None
+                self.last_heartbeat_ts = time.time()
+
+                # đăng ký là bắt đầu 1 phiên => quay lại GUARD, reset completed
+                self.completed = False
+                self.mode = "GUARD"
+
+            self.logger.info(f"register pid={pid} run_id={run_id} argv={self.target_argv[:2]}...")
             return "OK"
 
         if cmd == "shutdown":
@@ -118,52 +283,83 @@ class Watchdog:
             self._stop = True
             return "BYE"
 
-        if cmd == "register":
-            pid = int(payload.get("pid") or 0)
-            argv = payload.get("app_argv") or []
-            cwd = payload.get("cwd") or None
-            with self._lock:
-                self.target_pid = pid
-                self.target_argv = list(argv) if isinstance(argv, list) else []
-                self.target_cwd = str(cwd) if cwd else None
-            self.logger.info(f"register pid={pid} argv={self.target_argv[:2]}...")
-            return "OK"
-
         return "OK"
 
     def _monitor_loop(self):
-        last_dead = 0.0
         while not self._stop:
             time.sleep(0.5)
+
             with self._lock:
+                mode = self.mode
                 pid = self.target_pid
                 argv = list(self.target_argv)
                 cwd = self.target_cwd
-
-            if pid <= 0:
-                continue
-
-            alive = pid_exists(pid)
-            if alive:
-                continue
+                last_hb = self.last_heartbeat_ts
+                next_run = self.next_run_ts
 
             now = time.time()
-            # chống spam restart nếu app vừa chết và vừa bật lại nhanh
-            if now - last_dead < 2.0:
+
+            # -------- SCHEDULE MODE --------
+            if mode == "SCHEDULE":
+                if now >= next_run:
+                    self.logger.warning("schedule time reached -> spawn app")
+                    if argv:
+                        try:
+                            spawn_app(argv, cwd, log_dir=self.log_dir, embedded_python=getattr(self, "target_python", None))
+
+                        except Exception as e:
+                            self.logger.error(f"spawn scheduled app failed: {e}")
+
+                    # chuyển qua GUARD để bắt đầu đợi register/heartbeat
+                    with self._lock:
+                        self.mode = "GUARD"
+                        self.completed = False
+                        self.target_pid = 0
+                        self.target_run_id = ""
+                        self.last_heartbeat_ts = now  # grace 10s
+                        self.last_restart_ts = now
+                    continue
+
                 continue
-            last_dead = now
 
-            self.logger.warning(f"app pid={pid} is dead -> action")
-            # Action 1: restart app (nếu bạn muốn)
-            if argv:
-                try:
-                    self.logger.warning("restart app...")
-                    spawn_app(argv, cwd)
-                except Exception as e:
-                    self.logger.error(f"restart failed: {e}")
+            # -------- GUARD MODE --------
+            # Cooldown chống spam restart
+            with self._lock:
+                if now - self.last_restart_ts < self.cfg.restart_cooldown_s:
+                    continue
 
-            # Nếu bạn chỉ muốn chạy script khác:
-            # subprocess.Popen(["path/to/cleanup.exe"], ...)
+            # 1) heartbeat timeout => restart
+            if last_hb > 0 and (now - last_hb) > self.cfg.heartbeat_timeout_s:
+                self.logger.warning(f"heartbeat timeout ({now-last_hb:.1f}s) -> restart")
+                if argv:
+                    try:
+                        spawn_app(argv, cwd, log_dir=self.log_dir, embedded_python=getattr(self, "target_python", None))
+
+                    except Exception as e:
+                        self.logger.error(f"restart failed: {e}")
+
+                with self._lock:
+                    self.last_restart_ts = now
+                    self.target_pid = 0
+                    self.target_run_id = ""
+                    self.last_heartbeat_ts = now  # grace window
+                continue
+
+            # 2) pid dead => restart
+            if pid > 0 and (not pid_exists(pid)):
+                self.logger.warning(f"app pid={pid} is dead -> restart")
+                if argv:
+                    try:
+                        spawn_app(argv, cwd, log_dir=self.log_dir, embedded_python=getattr(self, "target_python", None))
+                    except Exception as e:
+                        self.logger.error(f"restart failed: {e}")
+
+                with self._lock:
+                    self.last_restart_ts = now
+                    self.target_pid = 0
+                    self.target_run_id = ""
+                    self.last_heartbeat_ts = now
+                continue
 
 def main():
     ap = argparse.ArgumentParser()
