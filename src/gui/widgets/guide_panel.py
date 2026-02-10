@@ -15,6 +15,7 @@ class GuideStep:
     title: str                      # ví dụ: "Xin thực hiện đóng fixture..."
     image_key: str                  # key ảnh trong assets (base key)
     confirm_text: str = "Bắt đầu"  # text trên button (có thể để "" nếu button asset đã có chữ)
+    title_fill: Optional[str] = None   # NEW
     # bạn có thể mở rộng thêm: hint_text, auto_delay, v.v...
 
 
@@ -81,6 +82,8 @@ class GuidePanel:
             justify="center",
             wraplength=10,   # will update on resize
         )
+        self._title_fill_default = title_fill
+
         self.lb_title.grid(row=0, column=0, sticky="ew", padx=12, pady=(10, 6))
 
         # Image canvas (use bind_canvas_asset here)
@@ -139,6 +142,43 @@ class GuidePanel:
         self.cv_img.bind("<Configure>", self._on_img_resize, add="+")
         self.cv_btn.bind("<Configure>", self._on_btn_resize, add="+")
 
+            # --- enter to confirm ---
+        self._visible = True
+        self._enter_enabled = True
+        self.root.bind("<Return>", self._on_key_enter, add="+")
+        self.root.bind("<KP_Enter>", self._on_key_enter, add="+")
+
+    def _on_key_enter(self, event=None):
+        # chỉ xử lý khi guide đang hiện
+        if not getattr(self, "_visible", True) or not getattr(self, "_enter_enabled", True):
+            return None
+        if not self.steps:
+            return None
+
+        # nếu đang focus vào entry/text thì để nó tự xử lý Enter (không hijack)
+        w = None
+        try:
+            w = self.root.focus_get()
+        except Exception:
+            w = None
+
+        if w is not None:
+            try:
+                cls = w.winfo_class()
+            except Exception:
+                cls = ""
+            if cls in ("Entry", "TEntry", "Text", "TCombobox", "Spinbox", "TSpinbox"):
+                return None
+
+        # nếu button đang disabled (busy) thì bỏ qua
+        if getattr(self._btn, "_disabled", False):
+            return "break"
+
+        # trigger giống click
+        self._on_confirm_click()
+        return "break"
+
+
     # ----------------------------
     # Public APIs
     # ----------------------------
@@ -152,7 +192,7 @@ class GuidePanel:
         self._apply_step()
 
     def show(self) -> None:
-        # delegate if center_panel has show/hide
+        self._visible = True
         if hasattr(self.center_panel, "show"):
             try:
                 self.center_panel.show()
@@ -161,11 +201,13 @@ class GuidePanel:
         self.frame.lift()
 
     def hide(self) -> None:
+        self._visible = False
         if hasattr(self.center_panel, "hide"):
             try:
                 self.center_panel.hide()
             except Exception:
                 pass
+
 
     def goto(self, index: int) -> None:
         if not self.steps:
@@ -215,6 +257,7 @@ class GuidePanel:
         title: Optional[str] = None,
         image_key: Optional[str] = None,
         confirm_text: Optional[str] = None,
+        title_fill: Optional[str] = None,
     ) -> None:
         if title is not None:
             self.title_var.set(title)
@@ -222,6 +265,12 @@ class GuidePanel:
             self._btn_set_text(confirm_text)
         if image_key is not None:
             self._update_image(image_key)
+        if title_fill is not None:
+            try:
+                fill = self._title_fill_default if title_fill in ("", "default") else title_fill
+                self.lb_title.configure(fg=fill)
+            except Exception:
+                pass
     # ----------------------------
     # Internals
     # ----------------------------
@@ -294,6 +343,11 @@ class GuidePanel:
         self.title_var.set(st.title or "Xin thực hiện ...")
         self._btn_set_text(st.confirm_text)
 
+        try:
+            fill = st.title_fill if st.title_fill is not None else self._title_fill_default
+            self.lb_title.configure(fg=fill)
+        except Exception:
+            pass
         # ensure layout sizes already updated
         self._on_resize()
 

@@ -345,6 +345,7 @@ class AppGUI:
 
         self.screen_width, self.screen_height = apply_fullscreen_and_capture_size(self.root)
 
+        
         try:
             # true fullscreen (no window decorations)
             self.root.attributes("-fullscreen", True)
@@ -367,17 +368,15 @@ class AppGUI:
         self._btn_disabled = {}
 
         self.assets = load_assets.tk_load_image_resources()
+        # Apply fullscreen on current monitor
+        fullscreen_on_monitor(self.root, self.current_window)
 
         # TODO: Create UI for testing fixture
-
         self.widgets_main = self._build_gui(win=self.root,
             canvas=self._canvas,
             sw=self.screen_width,
             sh=self.screen_height,)
-
-        # Apply fullscreen on current monitor
-        fullscreen_on_monitor(self.root, self.current_window)
-
+        
         self._init_guide_flow()
 
         self.create_extra_windows()
@@ -406,6 +405,9 @@ class AppGUI:
         # register + start heartbeat (2s/lần, watchdog timeout 10s)
         self._wd_do_register()
         self._wd_start_heartbeat(interval_ms=2000)
+        # Logout the width height screen
+        self._update_logs_panel(f"screen_width: {self.screen_width} | screen_height: {self.screen_height}", "green")
+        self._update_logs_panel(f"canvas_width: {self._canvas.winfo_width()} | canvas_height: {self._canvas.winfo_height()}", "green")
 
     def _wd_do_register(self) -> None:
         pid = os.getpid()
@@ -430,34 +432,6 @@ class AppGUI:
             on_finally=self._task_finally_cb,
             on_progress=self._task_progress_cb,
         )
-
-    # def _wd_do_register(self) -> None:
-    #     try:
-
-    #         self._ensure_watchdog_running()
-
-    #         pid = os.getpid()
-
-    #         # argv để watchdog spawn lại: ưu tiên sys.executable (exe khi frozen)
-    #         # argv = [sys.executable] + sys.argv[1:]
-
-    #         if getattr(sys, "frozen", False):
-    #             argv = [sys.executable, *sys.argv[1:]]              # exe đã là app
-    #         else:
-    #             argv = [sys.executable, os.path.abspath(sys.argv[0]), *sys.argv[1:]]  # python + run.py
-
-    #         cwd = os.getcwd()
-
-    #         ok = wd_register(pid=pid, run_id=self._wd_run_id, app_argv=argv, cwd=cwd)
-    #         if ok:
-    #             self._update_logs_panel("[watchdog] registered", "green")
-    #         else:
-    #             self._update_logs_panel("[watchdog] register failed", "yellow")
-    #     except Exception as e:
-    #         try:
-    #             self._update_logs_panel(f"[watchdog] register exception: {e}", "red")
-    #         except Exception:
-    #             pass
 
     def _wd_start_heartbeat(self, interval_ms: int = 2000) -> None:
         self._wd_hb_ms = int(interval_ms)
@@ -592,6 +566,24 @@ class AppGUI:
         )
         widgets["logs"] = logs
 
+
+        # --- NEW: Probe logs (bottom-left) ---
+        probe_x = (self.assets["fixture_info_frame_bg"].width() // 2) + 8
+        probe_y = bottom_y
+        probe_logs = bind_canvas_log_widget(
+            root=win,
+            canvas=canvas,
+            assets=self.assets,
+            tag="probe_logs_panel",
+            x=probe_x, y=probe_y,
+            bg_key="fixture_info_frame_bg",
+            anchor="center",
+            ui_max_lines=80,
+            buf_max_lines=300,
+        )
+        widgets["probe_logs"] = probe_logs
+
+
         # Create a Text line Powered by Bế Chí Kiên above the log panel
         credit_x_axis = sw - (self.assets["fixture_info_frame_bg"].width())
         credit_y_axis = sh - (self.assets["fixture_info_frame_bg"].height()) - 24
@@ -668,7 +660,8 @@ class AppGUI:
         widgets["credit"] = credit
         widgets["mode_oper"] = mode_oper
 
-        avoid = ["com_status", "logs_panel"] + [f"slot{i}_status" for i in range(1, 13)]
+        # avoid = ["com_status", "logs_panel"] + [f"slot{i}_status" for i in range(1, 13)]
+        avoid = ["com_status", "logs_panel", "probe_logs_panel"] + [f"slot{i}_status" for i in range(1, 13)]
 
         center_panel = bind_center_rect_panel(
             root=win,
@@ -802,11 +795,24 @@ class AppGUI:
         # gọi guide_done sau khi đã set flag
         try:
             self._guide_done()
+            
         except Exception:
             pass
 
+
         # rồi off app luôn (nếu bạn muốn terminate thật)
         # self._kill_app_windows()
+        self.taskq.submit(
+            func=self._shutdown_app_now,
+            kwargs={},
+            name="shutdown",
+            on_start=self._task_start_cb,
+            on_success=None,
+            on_error=None,
+            on_finally=None,
+            on_progress=self._task_progress_cb,
+        )
+        self._shutdown_app_now()
 
 
     def show_reset_confirm(self, win: tk.Misc | None = None):
@@ -1430,6 +1436,13 @@ class AppGUI:
                 pass
             self.listenport = None
 
+        for w in self._iter_windows():
+            ws = self._get_widgets(w)
+            pl = ws.get("probe_logs")
+            if pl:
+                try: pl.clear()
+                except Exception: pass
+
         # 3) nếu không có COM thì update status rồi return
         if result == "COMX":
             for w in self._iter_windows():
@@ -1445,7 +1458,7 @@ class AppGUI:
         try:
             dispatch = lambda fn: self.root.after(0, fn)
             self.listenport = ListenPort(
-                port=result,                 # dùng result, đừng dùng self.port mơ hồ
+                port=result,
                 baudrate=self.baudrate,
                 log=self.emit_msg,
                 on_rx=lambda s: self._update_logs_panel(f"RX: {s}", "white"),
@@ -1453,6 +1466,10 @@ class AppGUI:
             )
             self.listenport.start()
             status = self.com_status = "listening"
+
+            self.send_to_com(cmd="help", on_start=self._task_start_cb, on_success=None, on_error=None, on_finally=None, expect=None, reject=None)
+            self.send_to_com(cmd="?", on_start=self._task_start_cb, on_success=None, on_error=None, on_finally=None, expect=None, reject=None)
+            self._update_logs_panel(f"ListenPort started on {result}", "green")
         except Exception as e:
             self._update_logs_panel(f"Error starting ListenPort: {e}", "red")
             status = self.com_status = "error"
@@ -1482,6 +1499,7 @@ class AppGUI:
         def _ok(result, _meta):
             ok, lines = result
             self._update_logs_panel(f"TX: {cmd} | RX lines: {len(lines)}", "blue")
+            self._update_probe_logs_panel(f"{cmd}: {lines}", "green")
             if lines:
                 self._update_logs_panel(f"RX last: {lines[-1]}", "green" if ok else "yellow")
 
@@ -1612,6 +1630,21 @@ class AppGUI:
                 if logs:
                     logs.emit(line[0], color)  # màu trắng mặc định
 
+    def _update_probe_logs_panel(self, msg: str, color: LogColor = "white"):
+        """Panel riêng (góc trái dưới): chỉ dùng cho RX khi dò/kiểm tra COM fixture."""
+        txt = str(msg).rstrip("\n")
+        if not txt:
+            return
+        for w in self._iter_windows():
+            ws = self._get_widgets(w)
+            pl = ws.get("probe_logs")
+            if pl:
+                try:
+                    pl.emit(txt, color)
+                except Exception:
+                    pass
+
+
     ### Runner Callback
     def _task_start_cb(self, meta):
         name = meta["name"]
@@ -1623,15 +1656,37 @@ class AppGUI:
     def _task_progress_cb(self, payload):
         if not isinstance(payload, dict):
             return
-        self.message = payload["message"]
-        self.port = payload["port"]
-        self.baudrate = payload["baudrate"]
-        self.ending_line = payload["ending_line"]
-        # message = getattr(payload, "message", str(payload))
-        self._update_logs_panel(f"{self.message}")
-        self._update_logs_panel(f"port: {self.port}")
-        self._update_logs_panel(f"baudrate: {self.baudrate}")
-        self._update_logs_panel(f"ending_line: {self.ending_line}")
+
+        # --- PROBE RX (panel riêng) ---
+        if payload.get("kind") == "fixture_probe_rx":
+            port = str(payload.get("port", ""))
+            label = str(payload.get("label", "RX"))
+            rx = str(payload.get("rx", "") or "").strip("\n")
+            if rx:
+                self._update_probe_logs_panel(f"[{label}] {port}", "yellow")
+                for ln in rx.splitlines():
+                    self._update_probe_logs_panel(ln, "white")
+            return
+
+        # --- progress thường (an toàn nếu thiếu key) ---
+        msg = payload.get("message")
+        if msg:
+            self._update_logs_panel(str(msg))
+
+        port = payload.get("port", "")
+        baudrate = payload.get("baudrate", "")
+        ending_line = payload.get("ending_line", "")
+
+        if port:
+            self.port = port
+            self._update_logs_panel(f"port: {port}")
+        if baudrate:
+            self.baudrate = baudrate
+            self._update_logs_panel(f"baudrate: {baudrate}")
+        if ending_line:
+            self.ending_line = ending_line
+            self._update_logs_panel(f"ending_line: {ending_line}")
+
 
     def _task_error_cb(self, payload, meta):
         self._update_logs_panel(f"Error: {payload}", color="red")
@@ -1886,10 +1941,11 @@ class AppGUI:
         title: Optional[str] = None,
         image_key: Optional[str] = None,
         confirm_text: Optional[str] = None,
+        title_fill: Optional[str] = None,   # NEW
     ) -> None:
         for gp in self._iter_guide_panels():
             try:
-                gp.set_content(title=title, image_key=image_key, confirm_text=confirm_text)
+                gp.set_content(title=title, image_key=image_key, confirm_text=confirm_text, title_fill=title_fill)
             except Exception:
                 pass
 
@@ -1999,7 +2055,7 @@ class AppGUI:
         return plan
 
 
-    def _guide_patch_step_all(self, idx: int, *, title=None, image_key=None, confirm_text=None):
+    def _guide_patch_step_all(self, idx: int, *, title=None, image_key=None, confirm_text=None, title_fill=None):
         for gp in self._iter_guide_panels():
             try:
                 if not gp.steps:
@@ -2010,9 +2066,11 @@ class AppGUI:
                     title=title if title is not None else st.title,
                     image_key=image_key if image_key is not None else st.image_key,
                     confirm_text=confirm_text if confirm_text is not None else st.confirm_text,
+                    title_fill=title_fill if title_fill is not None else getattr(st, "title_fill", None),  # NEW
                 )
             except Exception:
                 pass
+
 
     def _guide_build_steps(self, plan: Sequence[GuideCase]) -> list[GuideStep]:
         steps: list[GuideStep] = []
@@ -2203,6 +2261,7 @@ class AppGUI:
             self._guide_set_busy_all(False, text="XÁC NHẬN")
 
             if ok:
+                PASS_GREEN = "#00FF80"  # #E1163F
                 # PASS slot hiện tại
                 self.update_slot_status(slot_id, "pass")
                 # self.reset_slot_status()
@@ -2219,11 +2278,13 @@ class AppGUI:
                         title="PASS toàn bộ slot. Fixture OK.",
                         image_key="fixture_pass_guide_240x240",
                         confirm_text="Thoát",
+                        title_fill=PASS_GREEN,         # <-- NEW
                     )
                     self._guide_set_content_all(
                         title="PASS toàn bộ slot. Fixture OK.",
                         image_key="fixture_pass_guide_240x240",
                         confirm_text="Thoát",
+                        title_fill=PASS_GREEN,         # <-- NEW
                     )
                     self._set_fixture_dummy_key_all("fixture_pass_guide_240x240")
                     self._guide_goto_all(done_idx)
@@ -2239,40 +2300,53 @@ class AppGUI:
                 self.update_slot_status(next_case.slot_id, "testing")
                 # self.reset_slot_status()
                 return
-
-            # FAIL (non-final / final)
+            FAIL_RED = "#FF3B30"  # #E1163F
             att = int(self._guide_attempts.get(slot_id, 0)) + 1
             self._guide_attempts[slot_id] = att
-
+    
             if att >= self._guide_max_attempts:
-                # FAIL FINAL => kết thúc while
                 self._guide_done_mode = "restart"
                 self.update_slot_status(slot_id, "fail")
-                # self.reset_slot_status()
                 self._guide_running = False
                 self._guide_current_step = done_idx
-                self._guide_goto_all(done_idx)
+
+                title = (
+                    f"FAIL FINAL tại Slot{slot_id} ({att}/{self._guide_max_attempts}). Dừng kiểm tra.\n"
+                    f"Lý do thất bại: Tại ô thứ {slot_id} - {self._slot_display_name(slot_id)}"
+                )
+
+                self._guide_goto_all(done_idx)  # <-- goto trước
+
                 self._guide_patch_step_all(
                     done_idx,
-                    title=f"FAIL FINAL tại Slot{slot_id} ({att}/{self._guide_max_attempts}). Dừng kiểm tra.\nLý do thất bại: Tại ô thứ {slot_id} - {self._slot_display_name()}",
+                    title=title,
                     image_key="fixture_fail_to_check_240x240",
                     confirm_text="BẮT ĐẦU LẠI",
+                    title_fill=FAIL_RED,         # <-- NEW
                 )
                 self._guide_set_content_all(
-                    title=f"FAIL FINAL tại Slot{slot_id} ({att}/{self._guide_max_attempts}). Dừng kiểm tra.\nLý do thất bại: Tại ô thứ {slot_id} - {self._slot_display_name()}",
+                    title=title,
                     image_key="fixture_fail_to_check_240x240",
                     confirm_text="BẮT ĐẦU LẠI",
+                    title_fill=FAIL_RED,         # <-- NEW
                 )
                 self._set_fixture_dummy_key_all("fixture_fail_to_check_240x240")
-                self._guide_goto_all(done_idx)
                 return
 
             # fail nhưng cho retry => slot vẫn TESTING, chờ user confirm lần nữa
             self.update_slot_status(slot_id, "testing")
-            # self.reset_slot_status()
+
+            self._guide_patch_step_all(
+                step_idx,
+                title=f"FAIL ({att}/{self._guide_max_attempts}).\n{case.title}\nHãy thực hiện lại thao tác rồi bấm THỬ LẠI.",
+                image_key=case.image_key,
+                title_fill=FAIL_RED,
+                confirm_text="Vui lòng thử lại",
+            )
             self._guide_set_content_all(
                 title=f"FAIL ({att}/{self._guide_max_attempts}).\n{case.title}\nHãy thực hiện lại thao tác rồi bấm THỬ LẠI.",
-                confirm_text="THỬ LẠI",
+                title_fill=FAIL_RED,
+                confirm_text="Vui lòng thử lại",
             )
             # stay on the same step
             self._guide_goto_all(step_idx)

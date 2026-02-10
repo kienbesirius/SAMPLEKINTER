@@ -545,11 +545,20 @@ class FixtureCheckSlotTest:
         # sau khi lấy img_key, lấy kích thước ảnh để tính wrap_width
         img = self.assets[img_key]                 # PhotoImage
         img_w = int(img.width()) if hasattr(img, "width") else 0
+        img_h = int(img.height()) if hasattr(img, "height") else 0
+
+        # NEW: lưu kích thước tile để auto font dùng
+        self._tile_w = img_w if img_w > 0 else 120
+        self._tile_h = img_h if img_h > 0 else 120
 
         wrap_w = text_wrap_width
         if wrap_w is None:
             # wrap theo bề ngang ảnh (trừ padding)
             wrap_w = max(1, img_w - 2 * text_wrap_pad) if img_w > 0 else 1
+
+        # NEW: lưu wrap-mode để status change có thể refresh width
+        self._wrap_auto = (text_wrap_width is None)
+        self._wrap_pad = int(text_wrap_pad)
 
         self.text_id = self.canvas.create_text(
             x,
@@ -641,10 +650,13 @@ class FixtureCheckSlotTest:
         else:
             self.canvas.itemconfig(self.text_id, fill=self.text_fill)
 
+        self._refresh_tile_metrics_from_key(key)
         self._sync_fx()
 
     def set_text(self, text: str):
         self.canvas.itemconfig(self.text_id, text=text)
+        self._apply_auto_font(text)
+        self._refresh_tile_metrics_from_key(text)
 
     def destroy(self):
         try:
@@ -763,7 +775,7 @@ class FixtureCheckSlotTest:
 
         # tile width: lưu từ init (xem phần dưới)
         w = int(getattr(self, "_tile_w", 120))
-
+        print(f"_auto_pick_font: tile_w={w}, label='{label}', max_word_len={max_len}")
         # bucket theo tile size
         if w <= 70:
             base = 9
@@ -790,6 +802,25 @@ class FixtureCheckSlotTest:
 
         return ("Tektur", base, "bold")
 
+
+    def _refresh_tile_metrics_from_key(self, key: str) -> None:
+        try:
+            img = self.assets.get(key)
+            if img is None:
+                return
+            w = int(img.width()) if hasattr(img, "width") else 0
+            h = int(img.height()) if hasattr(img, "height") else 0
+            if w > 0:
+                self._tile_w = w
+            if h > 0:
+                self._tile_h = h
+
+            # nếu wrap auto theo bề ngang tile -> cập nhật width của text
+            if getattr(self, "_wrap_auto", False):
+                wrap_w = max(1, int(self._tile_w) - 2 * int(getattr(self, "_wrap_pad", 8)))
+                self.canvas.itemconfig(self.text_id, width=wrap_w)
+        except Exception:
+            pass
 
     def _apply_auto_font(self, label: str) -> None:
         if not hasattr(self, "text_id"):
@@ -1014,6 +1045,7 @@ def bind_fixture_check_slot_test(
     if "fixture" in idle_status:
         # Get canvas height width to define button skins
         # canvas_width = canvas.winfo_width()
+        # print(f"canvas_width in bind_fixture_check_slot_test: {canvas_width}")
         # if canvas_width <= 800:
             idle_status += "_0.5"
             testing_status += "_0.5"

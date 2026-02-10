@@ -35,7 +35,7 @@ def _pick_scaled_key(canvas: tk.Canvas, assets: Dict[str, Any], base_key: str) -
         if k in assets:
             return k
     if w and w <= 1200:
-        k = f"{base_key}_0.75"
+        k = f"{base_key}_0.5"
         if k in assets:
             return k
     return base_key
@@ -67,14 +67,14 @@ def _scale_suffix_from_canvas(canvas: tk.Canvas) -> Optional[str]:
 
     # nếu winfo_width chưa “ready” (hay gặp lúc init), fallback về 0.75
     if w <= 1:
-        return "_0.75"
-
-    if w <= 800:
         return "_0.5"
-    if w <= 1200:
-        return "_0.75"
 
-    return None
+    # if w <= 800:
+    #     return "_0.5"
+    if w <= 1200:
+        return "_0.5"
+
+    return "_0.5"
 
 
 def _maybe_append_scale(assets: Dict[str, Any], canvas: tk.Canvas, base_key: str) -> str:
@@ -115,7 +115,7 @@ def _find_fixture_text_com_key(assets: Dict[str, Any], canvas: tk.Canvas, label:
 
     # ưu tiên scale hiện tại trước
     candidates = []
-    if scale in ("_0.5", "_0.75"):
+    if scale in ("_0.5", "_0.5"):
         candidates.append(f"fixture_text_com{num}{scale}")
 
     # fallback sang scale khác (nếu có)
@@ -606,17 +606,17 @@ def bind_fixture_circle_com_status(
     # Get canvas width to pick scaled assets
     if "fixture" in not_found_bg:
         # Get canvas height width to define button skins
-        canvas_width = canvas.winfo_width()
-        if canvas_width <= 800:
-            not_found_bg += "_0.5"
-            listening_bg += "_0.5"
-            stand_by_bg += "_0.5"
-            error_bg += "_0.5"
-        elif canvas_width <= 1200:
-            not_found_bg += "_0.75"
-            listening_bg += "_0.75"
-            stand_by_bg += "_0.75"
-            error_bg += "_0.75"
+        # canvas_width = canvas.winfo_width()
+        # if canvas_width <= 800:
+        not_found_bg += "_0.5"
+        listening_bg += "_0.5"
+        stand_by_bg += "_0.5"
+        error_bg += "_0.5"
+        # if canvas_width <= 1200:
+        # not_found_bg += "_0.75"
+        # listening_bg += "_0.75"
+        # stand_by_bg += "_0.75"
+        # error_bg += "_0.75"
 
     skins = ComStatusSkins(
         not_found=not_found_bg,
