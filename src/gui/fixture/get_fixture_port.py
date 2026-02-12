@@ -2,7 +2,7 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import List, Optional, Sequence, Tuple, Union, Callable
 
 import serial  # pip install pyserial
 
@@ -42,7 +42,19 @@ _FIXTURE_TOKENS = {
     "EMPTY_IN", "EMPTY", "PRODUCT", "STATE", "VERSION",
     "POWER_ON", "POWER_OFF", "PWR_ON", "PWR_OFF",
     "USB_IN", "USB_OUT", "RJ45_IN", "RJ45_OUT",
-    "READSN", "SN", "RESET",
+    "READSN", "SN", "RESET", "CHECK_DOOR",
+    "OPEN_DOOR", "CLOSE_DOOR",
+    "LOCK_DUT", "UNLOCK_DUT",
+    "PROBE_ON", "PROBE_OFF",
+
+    "PRESS_ON", "PRESS_OFF",
+
+    "RED_ON", "GREEN_ON", "YELLOW_ON",
+
+    "RASTER_STATE", "RASTER_UP", "RASTER_DOWN",
+    "RASTER_IN", "RASTER_OUT",
+
+    "CLEAR_COUNT"
 }
 
 # Các dòng info/boot thường thấy (không phải command list)
@@ -210,7 +222,9 @@ def _send_and_wait_text(
     payload: bytes,
     *,
     read_timeout: float,
-    tail_timeout: float = 2.0,
+    tail_timeout: float = 1.0,
+    max_after_first_data: float = 1.0,
+    break_predicate: Optional[Callable[[bytes], bool]] = None,
 ) -> str:
     """
     - Gửi payload
@@ -223,8 +237,8 @@ def _send_and_wait_text(
         first_byte_timeout=read_timeout,
         tail_timeout=tail_timeout,
         log_cb=None,
-        break_predicate=None,  # probe help -> đừng break theo keyword
-        max_after_first_data=12.0,
+        break_predicate=break_predicate,
+        max_after_first_data=max_after_first_data,
     )
     return raw.decode("utf-8", errors="ignore")
 
