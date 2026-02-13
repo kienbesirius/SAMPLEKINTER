@@ -10,17 +10,6 @@ from typing import Callable, Deque, List, Optional, Pattern, Tuple, Literal
 
 import serial
 
-import socket
-import select
-import re
-
-_TCP_ENDPOINT_RE = re.compile(r"(?i)^(?:tcp|eth)://([^/:]+)(?::(\d+))?$")
-
-def _parse_tcp_endpoint(s: str):
-    m = _TCP_ENDPOINT_RE.match((s or "").strip())
-    if not m:
-        return None
-    return m.group(1), int(m.group(2) or 0)
 
 # ----------------------------
 # Data structures
@@ -101,7 +90,6 @@ class ListenPort:
         log: Optional[Callable[[str], None]] = None,
         on_rx: Optional[Callable[[str], None]] = None,  # callback mỗi khi có line RX
         dispatch: Optional[Callable[[Callable[[], None]], None]] = None, 
-        mode_tcp: bool = False,
     ) -> None:
         self.port = str(port)
         self.baudrate = int(baudrate)
@@ -117,16 +105,6 @@ class ListenPort:
         self.log = log
         self.on_rx = on_rx
         self.dispatch = dispatch 
-
-        # --- TCP auto-detect (giữ nguyên chữ ký gọi từ GUI) ---
-        self._tcp_ep = _parse_tcp_endpoint(self.port)
-        if mode_tcp and not self._tcp_ep:
-            raise ValueError("mode_tcp=True requires port like TCP://host:port")
-
-        self._is_tcp = bool(mode_tcp or self._tcp_ep)
-        self._sock: Optional[socket.socket] = None
-        self._tcp_host = self._tcp_ep[0] if self._tcp_ep else ""
-        self._tcp_port = self._tcp_ep[1] if self._tcp_ep else 0
 
         # runtime
         self._ser: Optional[serial.Serial] = None
@@ -172,8 +150,7 @@ class ListenPort:
         if th:
             th.join(timeout=1.0)
 
-        self._close_transport()
-
+        self._close_serial()
 
         with self._lock_state:
             self._th = None
@@ -354,72 +331,23 @@ class ListenPort:
             pass
         self._ser = None
 
-    def _close_tcp(self) -> None:
-        try:
-            if self._sock:
-                try:
-                    self._sock.shutdown(socket.SHUT_RDWR)
-                except Exception:
-                    pass
-                try:
-                    self._sock.close()
-                except Exception:
-                    pass
-        except Exception:
-            pass
-        self._sock = None
+    # def _emit_line(self, s: str) -> None:
+    #     self._seq += 1
+    #     self._last_rx_time = time.perf_counter()
+    #     self._lines.append(RxLine(seq=self._seq, t=self._last_rx_time, text=s))
 
-    def _close_transport(self) -> None:
-        self._close_serial()
-        self._close_tcp()
+    #     # notify waiters
+    #     self._data_evt.set()
 
-    def _open_tcp(self) -> None:
-        host, port = self._tcp_host, self._tcp_port
-        if not host or port <= 0:
-            raise ValueError(f"Invalid TCP endpoint: {self.port!r} (expect TCP://host:port)")
-        s = socket.create_connection((host, port), timeout=self.open_timeout)
-        s.setblocking(False)
-        self._sock = s
-
-    def _open_transport(self) -> None:
-        if self._is_tcp:
-            self._open_tcp()
-        else:
-            self._open_serial()
-
-    def _tcp_sendall(self, sock: socket.socket, data: bytes) -> None:
-        view = memoryview(data)
-        end = time.perf_counter() + self.write_timeout
-
-        while view:
-            try:
-                sent = sock.send(view)
-                if sent <= 0:
-                    raise ConnectionError("tcp send returned 0")
-                view = view[sent:]
-            except BlockingIOError:
-                if time.perf_counter() > end:
-                    raise TimeoutError("tcp send timeout")
-                select.select([], [sock], [], 0.05)
-
-    def _tcp_drain(self, sock: socket.socket) -> None:
-        # đọc hết dữ liệu đang pending (nếu có)
-        while True:
-            try:
-                r, _, _ = select.select([sock], [], [], 0)
-            except Exception:
-                break
-            if not r:
-                break
-            try:
-                chunk = sock.recv(4096)
-                if not chunk:
-                    break
-            except BlockingIOError:
-                break
-            except Exception:
-                break
-
+    #     # callbacks
+    #     if self.log:
+    #         self.log(f"[RX] {s}")
+    #     if self.on_rx:
+    #         try:
+    #             self.on_rx(s)
+    #         except Exception:
+    #             pass
+        
     
     def _emit_line(self, s: str) -> None:
         self._seq += 1
@@ -459,98 +387,40 @@ class ListenPort:
             write_timeout=self.write_timeout,
         )
 
-    # def _handle_req(self, req: IORequest) -> None:
-    #     """
-    #     Thực thi request trên IO thread.
-    #     """
-    #     try:
-    #         ser = self._ser
-    #         if ser is None or (not ser.is_open):
-    #             raise RuntimeError("serial not open")
-
-    #         if req.kind == "write":
-    #             payload = req.cmd.rstrip("\r\n")
-    #             if req.append_crlf:
-    #                 payload += "\r\n"
-    #             b = payload.encode(self.encode, errors="replace")
-    #             ser.write(b)
-    #             ser.flush()
-
-    #         elif req.kind == "clear_in":
-    #             try:
-    #                 ser.reset_input_buffer()
-    #             except Exception:
-    #                 pass
-
-    #         elif req.kind == "clear_out":
-    #             try:
-    #                 ser.reset_output_buffer()
-    #             except Exception:
-    #                 pass
-
-    #         elif req.kind == "flush":
-    #             try:
-    #                 ser.flush()
-    #             except Exception:
-    #                 pass
-
-    #     except BaseException as e:
-    #         req.error = e
-    #     finally:
-    #         if req.done:
-    #             req.done.set()
-
     def _handle_req(self, req: IORequest) -> None:
         """
         Thực thi request trên IO thread.
         """
         try:
-            if self._is_tcp:
-                sock = self._sock
-                if sock is None:
-                    raise RuntimeError("tcp not open")
-            else:
-                ser = self._ser
-                if ser is None or (not ser.is_open):
-                    raise RuntimeError("serial not open")
+            ser = self._ser
+            if ser is None or (not ser.is_open):
+                raise RuntimeError("serial not open")
 
             if req.kind == "write":
                 payload = req.cmd.rstrip("\r\n")
                 if req.append_crlf:
                     payload += "\r\n"
                 b = payload.encode(self.encode, errors="replace")
-
-                if self._is_tcp:
-                    self._tcp_sendall(sock, b)  # type: ignore[arg-type]
-                else:
-                    ser.write(b)               # type: ignore[union-attr]
-                    ser.flush()                # type: ignore[union-attr]
+                ser.write(b)
+                ser.flush()
 
             elif req.kind == "clear_in":
-                if self._is_tcp:
-                    self._tcp_drain(sock)      # type: ignore[arg-type]
-                    self._rx_buf = bytearray()
-                else:
-                    try:
-                        ser.reset_input_buffer()  # type: ignore[union-attr]
-                    except Exception:
-                        pass
+                try:
+                    ser.reset_input_buffer()
+                except Exception:
+                    pass
 
             elif req.kind == "clear_out":
-                if not self._is_tcp:
-                    try:
-                        ser.reset_output_buffer()  # type: ignore[union-attr]
-                    except Exception:
-                        pass
-                # tcp: no-op
+                try:
+                    ser.reset_output_buffer()
+                except Exception:
+                    pass
 
             elif req.kind == "flush":
-                if not self._is_tcp:
-                    try:
-                        ser.flush()  # type: ignore[union-attr]
-                    except Exception:
-                        pass
-                # tcp: no-op
+                try:
+                    ser.flush()
+                except Exception:
+                    pass
 
         except BaseException as e:
             req.error = e
@@ -559,16 +429,16 @@ class ListenPort:
                 req.done.set()
 
     def _io_loop(self) -> None:
-        # open transport
+        # open serial
         try:
-            self._open_transport()
+            self._open_serial()
             self._ready_evt.set()
         except Exception as e:
             if self.log:
                 self.log(f"[ERR] open {self.port}@{self.baudrate}: {e}")
             return
 
-        # assert self._ser is not None
+        assert self._ser is not None
 
         while not self._stop_evt.is_set():
             # 1) drain some IO requests (TX/clear/flush)
@@ -581,51 +451,16 @@ class ListenPort:
                 self._handle_req(req)
                 drained += 1
 
-            # # 2) read incoming bytes
-            # try:
-            #     n = self._ser.in_waiting
-            # except Exception:
-            #     n = 0
+            # 2) read incoming bytes
+            try:
+                n = self._ser.in_waiting
+            except Exception:
+                n = 0
 
-            # try:
-            #     chunk = self._ser.read(n or 1)
-            # except Exception:
-            #     chunk = b""
-
-             # 2) read incoming bytes
-            chunk = b""
-
-            if self._is_tcp:
-                sock = self._sock
-                if sock is None:
-                    break
-
-                try:
-                    r, _, _ = select.select([sock], [], [], 0)
-                except Exception:
-                    r = []
-
-                if r:
-                    try:
-                        chunk = sock.recv(4096)
-                    except BlockingIOError:
-                        chunk = b""
-                    except Exception:
-                        chunk = b""
-
-                    # remote closed
-                    if chunk == b"":
-                        break
-            else:
-                try:
-                    n = self._ser.in_waiting  # type: ignore[union-attr]
-                except Exception:
-                    n = 0
-
-                try:
-                    chunk = self._ser.read(n or 1)  # type: ignore[union-attr]
-                except Exception:
-                    chunk = b""
+            try:
+                chunk = self._ser.read(n or 1)
+            except Exception:
+                chunk = b""
 
             if chunk:
                 self._rx_buf += chunk
@@ -641,7 +476,5 @@ class ListenPort:
             else:
                 time.sleep(self.read_sleep)
 
-        # self._close_serial()
-        self._close_transport()
-
+        self._close_serial()
 

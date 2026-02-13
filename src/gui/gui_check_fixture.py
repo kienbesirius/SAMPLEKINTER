@@ -36,7 +36,6 @@ from src.gui.widgets.dialog import ModalOverlay
 import tkinter.font as tkfont
 from src.watchdog.watchdog_gui import wd_register, wd_heartbeat, wd_complete
 from src.watchdog.watchdog_gui import ensure_watchdog_running_auto
-from src.gui.fixture.get_fixture_ethernet import get_fixture_ethernet, parse_tcp_endpoint
 
 @dataclass
 class GuideCase:
@@ -47,21 +46,6 @@ class GuideCase:
     image_key: str
     cmd: str
     expect: Optional[Pattern[str]] = None
-
-
-def _ending_key(v: str) -> str:
-    u = (v or "").strip().upper()
-    if u in ("CRLF", "LF", "CR", "NONE"):
-        return u
-    if v == "\r\n":
-        return "CRLF"
-    if v == "\n":
-        return "LF"
-    if v == "\r":
-        return "CR"
-    if v == "":
-        return "NONE"
-    return "CRLF"
 
 
 # CORE-1: Getting fixture port
@@ -122,34 +106,6 @@ def obtaining_fixture_com(emit=print, cancel_event: threading.Event=None, progre
                 _progress(f"Cached port not fixture, fallback scanning...", port=fx.port,
                         baudrate=fx.baudrate, ending_line=fx.ending_line)
                 
-        # --- cached TCP endpoint? verify via ethernet first ---
-        if parse_tcp_endpoint(fx.port):
-            ending_hold = {"v": fx.ending_line}
-
-            def _eth_progress(d: dict):
-                if isinstance(d, dict) and d.get("ending_line") is not None:
-                    ending_hold["v"] = d["ending_line"]
-                if progress_cb:
-                    progress_cb(d)
-
-            _progress(f"Checking cached ethernet fixture: {fx.port} ...", port=fx.port, baudrate=0, ending_line=fx.ending_line)
-
-            ep = get_fixture_ethernet(cfg_path=cfg_path, endpoint_hint=fx.port, emit=emit, progress_cb=_eth_progress)
-            if ep:
-                try:
-                    update_ini_fixture_section(
-                        cfg_path,
-                        port=ep,
-                        baudrate=0,
-                        ending_line=_ending_key(ending_hold["v"]),
-                        timeout=fx.timeout,
-                    )
-                except Exception:
-                    pass
-                _progress("Found fixture (cached ethernet).", port=ep, baudrate=0, ending_line=ending_hold["v"])
-                return ep
-
-            _progress("Cached ethernet not reachable, fallback scanning...", port=fx.port, baudrate=0, ending_line=fx.ending_line)
 
         ports = get_serial_ports()
         for port in ports:
@@ -185,32 +141,6 @@ def obtaining_fixture_com(emit=print, cancel_event: threading.Event=None, progre
                           ending_line=getattr(r, "ending_line", parsed.line_ending))
                 return port
             time.sleep(0.1)  # giả lập delay kiểm tra
-
-        # --- fallback: Ethernet (TCP) ---
-        ending_hold = {"v": fx.ending_line}
-
-        def _eth_progress2(d: dict):
-            if isinstance(d, dict) and d.get("ending_line") is not None:
-                ending_hold["v"] = d["ending_line"]
-            if progress_cb:
-                progress_cb(d)
-
-        ep = get_fixture_ethernet(cfg_path=cfg_path, endpoint_hint=fx.port, emit=emit, progress_cb=_eth_progress2)
-        if ep:
-            emit("Found fixture on Ethernet:", ep)
-            try:
-                update_ini_fixture_section(
-                    cfg_path,
-                    port=ep,
-                    baudrate=0,
-                    ending_line=_ending_key(ending_hold["v"]),
-                    timeout=fx.timeout,
-                )
-            except Exception:
-                pass
-
-            _progress("Found fixture (ethernet fallback).", port=ep, baudrate=0, ending_line=ending_hold["v"])
-            return ep
 
         emit("No fixture COM found.")
         return "COMX"
