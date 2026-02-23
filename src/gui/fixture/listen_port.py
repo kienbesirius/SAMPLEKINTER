@@ -291,6 +291,8 @@ class ListenPort:
                         # check expect
                         if expect is not None and (not matched) and expect.search(rx.text):
                             matched = True
+                        if reject is not None and reject.search(rx.text):
+                            return False, out_lines
 
             # điều kiện kết thúc: chỉ áp dụng idle window SAU KHI đã có RX thuộc command
             # chỉ kết thúc theo idle window SAU KHI đã có RX thuộc command

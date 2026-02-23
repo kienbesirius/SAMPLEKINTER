@@ -36,6 +36,7 @@ from src.gui.widgets.dialog import ModalOverlay
 import tkinter.font as tkfont
 from src.watchdog.watchdog_gui import wd_register, wd_heartbeat, wd_complete
 from src.watchdog.watchdog_gui import ensure_watchdog_running_auto
+from collections import deque
 
 @dataclass
 class GuideCase:
@@ -46,6 +47,7 @@ class GuideCase:
     image_key: str
     cmd: str
     expect: Optional[Pattern[str]] = None
+    reject: Optional[Pattern[str]] = None
 
 
 # CORE-1: Getting fixture port
@@ -696,9 +698,7 @@ class AppGUI:
             on_confirm=self._on_guide_confirm,
             auto_hide_on_done=False,
         )
-
         guide.set_steps(self._build_guide_preview_steps())
-
         guide.start()
 
         widgets["guide"] = guide
@@ -1635,6 +1635,7 @@ class AppGUI:
         txt = str(msg).rstrip("\n")
         if not txt:
             return
+
         for w in self._iter_windows():
             ws = self._get_widgets(w)
             pl = ws.get("probe_logs")
@@ -1643,7 +1644,6 @@ class AppGUI:
                     pl.emit(txt, color)
                 except Exception:
                     pass
-
 
     ### Runner Callback
     def _task_start_cb(self, meta):
@@ -1686,7 +1686,6 @@ class AppGUI:
         if ending_line:
             self.ending_line = ending_line
             self._update_logs_panel(f"ending_line: {ending_line}")
-
 
     def _task_error_cb(self, payload, meta):
         self._update_logs_panel(f"Error: {payload}", color="red")
@@ -1782,8 +1781,6 @@ class AppGUI:
             out.append((slot_id, st))
         return out
 
-
-
     # --- 3) điều kiện cho phép đóng ---
     def _can_close_now(self) -> Tuple[bool, str]:
         """
@@ -1814,8 +1811,7 @@ class AppGUI:
         #     return False, f"slots not passed: {not_pass}"
 
         return True, "all idle/pass"
-
-
+    
     # --- 4) guarded close mới ---
     def _guarded_close_by_slots(self, win):
 
@@ -1959,7 +1955,6 @@ class AppGUI:
     def _guide_make_case(self, slot_id: int, slot_label: str, slot_cmd0: str) -> GuideCase:
         label = (slot_label or "").strip().upper()
         cmd0 = (slot_cmd0 or "").strip()
-        
         # --- choose cmd ---
         cmd = cmd0
         if not cmd:
@@ -1988,39 +1983,45 @@ class AppGUI:
         ## TODO: CATCH patterns
         # OK_WORDS = ["ok", "pass", "passed", "success", "done"]
         # expect = re.compile(r"\b(?:%s)\b" % "|".join(map(re.escape, OK_WORDS)), re.I)
-        # reject = re.compile(r"\b(?:not\s+ok|fail(?:ed)?|ng|error|timeout)\b", re.I)
+        # reject = re.compile(r"\b(?:OK|ok|True|true|closed|CLOSED|Closed)\b", re.I)
         up_cmd = cmd.strip().upper()
 
         if "SENSOR TOP LEFT" in label:
             img = "guide_sensor_top_left"
             title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc trên trái ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
-            expect = re.compile(r"ok", re.I)
+            # expect = re.compile(r"ok", re.I)
             ## TODO: CATCH patterns
-            # expect = re.compile(r"\b(?:ok|pass(?:ed)?|success|done)\b", re.I)
+            expect = re.compile(r"\b(?:PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
+            reject = re.compile(r"\b(?:OK|ok|True|true|closed|CLOSED|Closed)\b", re.I)
         elif "SENSOR TOP RIGHT" in label:
             img = "guide_sensor_top_right"
             title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc trên phải ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
             ## TODO: CATCH patterns
-            expect = re.compile(r"ok", re.I)
+            expect = re.compile(r"\b(?:PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
+            reject = re.compile(r"\b(?:OK|ok)\b", re.I)
         elif "SENSOR BOT LEFT" in label:
             img = "guide_sensor_bottom_left"
             title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc dưới trái ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
             # theo dummy fixture bạn đã mô tả: có thể trả STOPPED/NG/timeout/EMC
-            expect = re.compile(r"ok", re.I)
+            expect = re.compile(r"\b(?:PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
+            reject = re.compile(r"\b(?:OK|ok)\b", re.I)
         elif "SENSOR BOT RIGHT" in label:
             img = "guide_sensor_bottom_right"
             title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc dưới phải ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
-            expect = re.compile(r"ok", re.I)
+            expect = re.compile(r"\b(?:PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
+            reject = re.compile(r"\b(?:OK|ok)\b", re.I)
         elif "SENSOR" in up_cmd:
             img = "guide_close_fixture"
             title = f"[Slot{slot_id}] Hãy dùng công cụ che SENSOR ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
-            expect = re.compile(r"ok", re.I)
+            expect = re.compile(r"\b(?:PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
+            reject = re.compile(r"\b(?:OK|ok)\b", re.I)
 
         elif "STOP" in label or "FORCE STOP" in label:
             img = "fixture_stop_guide_240x240"
             title = f"[Slot{slot_id}] Hãy nhấn nút FORCE STOP - DỪNG KHẨN CẤP.\nBấm xác nhận để kiểm tra!"
-            expect = re.compile(r"\b(?:not\s+ok|fail(?:ed)?|ng|error|timeout|EMC|emc|STOPPED)\b", re.I)
+            expect = re.compile(r"\b(?:not\s+ok|fail(?:ed)?|ng|error|timeout|EMC|emc|STOPPED|STOP_ON|STOP!|HOLD_ON)\b", re.I)
             # expect = re.compile(r"OK", re.I)
+            reject = re.compile(r"\b(?:OK|ok)\b", re.I)
 
         return GuideCase(
             slot_id=slot_id,
@@ -2029,6 +2030,7 @@ class AppGUI:
             image_key=img,
             cmd=cmd,
             expect=expect,
+            reject=reject,
         )
 
     def _guide_build_plan(self) -> list[GuideCase]:
@@ -2251,6 +2253,7 @@ class AppGUI:
                 cmd=case.cmd,
                 append_crlf=True,
                 expect=case.expect,
+                reject=case.reject,
                 on_line=lambda s: dispatch(lambda: self._update_logs_panel(f"RX: {s}", "yellow")),
             )
             return ok, lines
@@ -2364,7 +2367,7 @@ class AppGUI:
         def _finally(_meta):
             self._task_finally_cb(_meta)
 
-        self.send_to_com(case.cmd, on_start=self._task_start_cb, on_success=_ok, on_error=_err, on_finally=_finally, expect=case.expect, reject=None)
+        self.send_to_com(case.cmd, on_start=self._task_start_cb, on_success=_ok, on_error=_err, on_finally=_finally, expect=case.expect, reject=case.reject)
 
     def _startup_label(self) -> str:
         return "STARTUP: ON" if self.startup_enabled else "STARTUP: OFF"
@@ -2470,4 +2473,5 @@ def _is_fail(s: Any) -> bool:
 
 def _is_testing(s: Any) -> bool:
     return _norm_state(s) in _TESTING
+
 
