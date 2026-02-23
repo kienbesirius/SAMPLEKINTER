@@ -108,7 +108,54 @@ _FIXTURE_TOKENS = {
     "RASTER_STATE", "RASTER_UP", "RASTER_DOWN",
     "RASTER_IN", "RASTER_OUT",
 
-    "CLEAR_COUNT"
+    "CLEAR_COUNT",
+    # --- nhóm HELP kiểu list đơn ---
+    "VERSIONS", "BOX_STATUS", "RELAY_ALL_ON",
+    "COUNTER_RESET", "COUNTER_ADD", "COUNTER_SUB", "READ_COUNT",
+    "COUNT", "READ_COUNT_ALL", "CLEAR_COUNT", "RST_SET_COUNT",
+
+    # --- nhóm ON/OFF + đo đạc (xuất hiện trong help list) ---
+    "BATTERY_CYLINDER", "LED_CYLINDER", "BUTTON_CYLINDER", "HEATER_PLATE_CYLINDER",
+    "DEBUGBOARD", "TYPEC_BOARD",
+    "SBU_PULL_DOWN",
+    "BATTERY_CHARGE", "DEBUG_VBUS_5V",
+    "TYPEC_VBUS_PC", "TYPEC_VBUS_POE", "TYPEC_USB_PC", "TYPEC_USB_POE",
+    "SYSTEM_VOL_GET", "SYSTEM_CUR_GET", "BATTERY_CHARGE_VOL_GET",
+    "CUR_MODE", "READ_CUR", "LOAD",
+
+    # --- nhóm menu help (có command + mô tả) ---
+    "STATUS", "TEMP", "LIGHT_ON", "LIGHT_OFF", "ALL_LED_OFF",
+    "RED_ON", "GREEN_ON", "BLUE_ON",
+    "DEBUG_POWER_ON", "DEBUG_POWER_OFF",
+    "TYPEC_POWER_ON", "TYPEC_POWER_OFF",
+    "OPEN_DOOR", "CLOSE_DOOR",
+    "SIDE_IN", "SIDE_OUT",
+
+    # --- nhóm “CONTROL CAMMAND” kiểu CMD:DESC ---
+    "S_SYSTEM_RST",
+    "SET_U1BR", "SET_U2BR", "SET_U3BR",
+    "SET_DEBUG_MODE", "SET_BTN_DELAY",
+    "READ_PARA", "CLEAR_PARA",
+    "OUTPUTH", "OUTPUTL",
+    "FIXTURE_IN", "FIXTURE_OUT",
+    "POGOPIN_UP", "POGOPIN_DOWN",
+    "USB_UP", "USB_DOWN",
+    "FASTEN_ON", "FASTEN_OFF",
+    "BUTTON_TEST",
+    "POWER_ON", "POWER_OFF", "LED_ON", "LED_OFF",
+    "EMPTY_OUT",
+    "CHECK_DUT", "CHECK_STATE", "CHECK_RASTER",
+    "READ_MAX_FORCE", "READ_REAL_FORCE", "SET_FORCE_BAUDRATE",
+    "AUDIO_OPEN", "AUDIO_CLOSE",
+    "SET_VOLUME_5", "SET_VOLUME_10", "SET_VOLUME_20",
+    "SET_AUDIO_ADDR", "VOLUME_ADD", "VOLUME_DEC",
+    "AGING_TEST",
+
+    # --- nhóm help list khác ---
+    "FIND", "GS_PWR_ON", "GS_PWR_OFF",
+    "DUT_SENSOR", "RASTER_STATE",
+    "POWER_ON1", "POWER_ON2", "POWER_OFF1", "POWER_OFF2",
+    "UART_DL_ON", "UART_DL_OFF",
 }
 
 # Các dòng info/boot thường thấy (không phải command list)
@@ -276,8 +323,8 @@ def _send_and_wait_text(
     payload: bytes,
     *,
     read_timeout: float,
-    tail_timeout: float = 1.0,
-    max_after_first_data: float = 1.0,
+    tail_timeout: float = 0.5,
+    max_after_first_data: float = 0.5,
     break_predicate: Optional[Callable[[bytes], bool]] = None,
 ) -> str:
     """
@@ -312,7 +359,7 @@ def _probe_one_port(
                 port=port,
                 baudrate=br,
                 timeout=0,          # non-blocking read
-                write_timeout=1.0,  # probe cmd ngắn
+                write_timeout=0.5,  # probe cmd ngắn
             )
         except Exception:
             continue
@@ -350,7 +397,7 @@ def _probe_one_port(
                             ser,
                             payload,
                             read_timeout=per_cmd_wait_s,
-                            tail_timeout=2.0,
+                            tail_timeout=0.75,
                         )
                     except Exception:
                         continue
@@ -395,7 +442,7 @@ def get_fixture_port(
     probe_cmds: Optional[Sequence[str]] = None,
     *,
     baudrates: Sequence[int] = (115200, 9600, 57600, 38400, 19200),
-    per_cmd_wait_s: float = 3.0,
+    per_cmd_wait_s: float = 1.0,
     prefer_first: Optional[Sequence[str]] = None,
     return_debug: bool = False,
 ) -> Optional[str] | Tuple[Optional[str], List[ProbeResult]]:
