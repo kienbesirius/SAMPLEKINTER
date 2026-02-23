@@ -21,6 +21,53 @@ _STRONG_KEYWORDS = {
     "HELP", "FIXTURE", "EMPTY", "EMPTY_IN",
     "STOP", "EMC", "POWER", "PWR", "RELAY", "UART", "USB", "RJ45",
     "INPUT", "CHECK", "SET", "SN", "READSN",
+    # --- nhóm HELP kiểu list đơn ---
+    "VERSIONS", "BOX_STATUS", "RELAY_ALL_ON",
+    "COUNTER_RESET", "COUNTER_ADD", "COUNTER_SUB", "READ_COUNT",
+    "COUNT", "READ_COUNT_ALL", "CLEAR_COUNT", "RST_SET_COUNT",
+
+    # --- nhóm ON/OFF + đo đạc (xuất hiện trong help list) ---
+    "BATTERY_CYLINDER", "LED_CYLINDER", "BUTTON_CYLINDER", "HEATER_PLATE_CYLINDER",
+    "DEBUGBOARD", "TYPEC_BOARD",
+    "SBU_PULL_DOWN",
+    "BATTERY_CHARGE", "DEBUG_VBUS_5V",
+    "TYPEC_VBUS_PC", "TYPEC_VBUS_POE", "TYPEC_USB_PC", "TYPEC_USB_POE",
+    "SYSTEM_VOL_GET", "SYSTEM_CUR_GET", "BATTERY_CHARGE_VOL_GET",
+    "CUR_MODE", "READ_CUR", "LOAD",
+
+    # --- nhóm menu help (có command + mô tả) ---
+    "STATUS", "TEMP", "LIGHT_ON", "LIGHT_OFF", "ALL_LED_OFF",
+    "RED_ON", "GREEN_ON", "BLUE_ON",
+    "DEBUG_POWER_ON", "DEBUG_POWER_OFF",
+    "TYPEC_POWER_ON", "TYPEC_POWER_OFF",
+    "OPEN_DOOR", "CLOSE_DOOR",
+    "SIDE_IN", "SIDE_OUT",
+
+    # --- nhóm “CONTROL CAMMAND” kiểu CMD:DESC ---
+    "S_SYSTEM_RST",
+    "SET_U1BR", "SET_U2BR", "SET_U3BR",
+    "SET_DEBUG_MODE", "SET_BTN_DELAY",
+    "READ_PARA", "CLEAR_PARA",
+    "OUTPUTH", "OUTPUTL",
+    "FIXTURE_IN", "FIXTURE_OUT",
+    "POGOPIN_UP", "POGOPIN_DOWN",
+    "USB_UP", "USB_DOWN",
+    "FASTEN_ON", "FASTEN_OFF",
+    "BUTTON_TEST",
+    "POWER_ON", "POWER_OFF", "LED_ON", "LED_OFF",
+    "EMPTY_OUT",
+    "CHECK_DUT", "CHECK_STATE", "CHECK_RASTER",
+    "READ_MAX_FORCE", "READ_REAL_FORCE", "SET_FORCE_BAUDRATE",
+    "AUDIO_OPEN", "AUDIO_CLOSE",
+    "SET_VOLUME_5", "SET_VOLUME_10", "SET_VOLUME_20",
+    "SET_AUDIO_ADDR", "VOLUME_ADD", "VOLUME_DEC",
+    "AGING_TEST",
+
+    # --- nhóm help list khác ---
+    "FIND", "GS_PWR_ON", "GS_PWR_OFF",
+    "DUT_SENSOR", "RASTER_STATE",
+    "POWER_ON1", "POWER_ON2", "POWER_OFF1", "POWER_OFF2",
+    "UART_DL_ON", "UART_DL_OFF",
 }
 
 # Các cụm “đánh dấu help” hay gặp (bắt cả typo trong log)
@@ -33,6 +80,13 @@ _HELP_MARKERS = (
     "GET COMMAND INFO",
     "SHOW_COMMAND",
     "?(SHOW ALL THE COMMANDS)",
+    "<--------------- Main ---------------------------->",
+    "<-------------- Product --------------------------->",
+    "<--------------Other------------------------------->",
+    "-- Main --",
+    "-- Product --",
+    "--Other--",
+
 )
 
 # Token command “một dòng 1 lệnh” thường gặp của fixture
