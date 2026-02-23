@@ -1979,6 +1979,7 @@ class AppGUI:
         img = "fixture_240x240"
         title = f"[Slot{slot_id}] {label or 'CHECK'}"
         expect: Optional[Pattern[str]] = None
+        reject: Optional[Pattern[str]] = None
 
 
         ## TODO: CATCH patterns
@@ -1992,37 +1993,37 @@ class AppGUI:
             title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc trên trái ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
             # expect = re.compile(r"ok", re.I)
             ## TODO: CATCH patterns
-            expect = re.compile(r"\b(?:PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
-            reject = re.compile(r"\b(?:OK|ok|True|true|closed|CLOSED|Closed)\b", re.I)
+            expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error||NG)\b", re.I)
+            reject = re.compile(r"\b(?:OK|ok|READY|close|CLOSED|Closed)\b", re.I)
         elif "SENSOR TOP RIGHT" in label:
             img = "guide_sensor_top_right"
             title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc trên phải ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
             ## TODO: CATCH patterns
-            expect = re.compile(r"\b(?:PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
-            reject = re.compile(r"\b(?:OK|ok)\b", re.I)
+            expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error||NG)\b", re.I)
+            reject = re.compile(r"\b(?:OK|ok|READY|close|CLOSED|Closed)\b", re.I)
         elif "SENSOR BOT LEFT" in label:
             img = "guide_sensor_bottom_left"
             title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc dưới trái ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
             # theo dummy fixture bạn đã mô tả: có thể trả STOPPED/NG/timeout/EMC
-            expect = re.compile(r"\b(?:PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
-            reject = re.compile(r"\b(?:OK|ok)\b", re.I)
+            expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error||NG)\b", re.I)
+            reject = re.compile(r"\b(?:OK|ok|READY|close|CLOSED|Closed)\b", re.I)
         elif "SENSOR BOT RIGHT" in label:
             img = "guide_sensor_bottom_right"
             title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc dưới phải ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
-            expect = re.compile(r"\b(?:PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
-            reject = re.compile(r"\b(?:OK|ok)\b", re.I)
+            expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error||NG)\b", re.I)
+            reject = re.compile(r"\b(?:OK|ok|READY|close|CLOSED|Closed)\b", re.I)
         elif "SENSOR" in up_cmd:
             img = "guide_close_fixture"
             title = f"[Slot{slot_id}] Hãy dùng công cụ che SENSOR ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
-            expect = re.compile(r"\b(?:PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
-            reject = re.compile(r"\b(?:OK|ok)\b", re.I)
+            expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error||NG)\b", re.I)
+            reject = re.compile(r"\b(?:OK|ok|READY|close|CLOSED|Closed)\b", re.I)
 
         elif "STOP" in label or "FORCE STOP" in label:
             img = "fixture_stop_guide_240x240"
             title = f"[Slot{slot_id}] Hãy nhấn nút FORCE STOP - DỪNG KHẨN CẤP.\nBấm xác nhận để kiểm tra!"
-            expect = re.compile(r"\b(?:not\s+ok|fail(?:ed)?|ng|error|timeout|EMC|emc|STOPPED|STOP_ON|STOP!|HOLD_ON)\b", re.I)
+            expect = re.compile(r"\b(?:not\s+ok|fail(?:ed)?|ng|error|timeout|EMC|emc|STOPPED|STOP_ON|STOP!|HOLD_ON|stop|E_STOP|RASTER_ERROR|NG)\b", re.I)
             # expect = re.compile(r"OK", re.I)
-            reject = re.compile(r"\b(?:OK|ok)\b", re.I)
+            # reject = re.compile(r"\b(?:OK|ok)\b", re.I)
 
         return GuideCase(
             slot_id=slot_id,

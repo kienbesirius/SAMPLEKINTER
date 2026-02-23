@@ -68,6 +68,10 @@ _STRONG_KEYWORDS = {
     "DUT_SENSOR", "RASTER_STATE",
     "POWER_ON1", "POWER_ON2", "POWER_OFF1", "POWER_OFF2",
     "UART_DL_ON", "UART_DL_OFF",
+    "BUTTON_ON", "BUTTON_OFF", "BTN_ON",
+    "LCD_ON", "LCD_OFF",
+    "COUNTS", "COUNT", "CLEAR_COUNTER",
+    "L_HOT_ON", "L_HOT_OFF", "M_HOT_ON", "M_HOT_OFF", "R_HOT_ON", "R_HOT_OFF",
 }
 
 # Các cụm “đánh dấu help” hay gặp (bắt cả typo trong log)
@@ -110,7 +114,7 @@ _FIXTURE_TOKENS = {
 
     "CLEAR_COUNT",
     # --- nhóm HELP kiểu list đơn ---
-    "VERSIONS", "BOX_STATUS", "RELAY_ALL_ON",
+    "VERSIONS", "BOX_STATUS", "RELAY_ALL_ON", "RELAY",
     "COUNTER_RESET", "COUNTER_ADD", "COUNTER_SUB", "READ_COUNT",
     "COUNT", "READ_COUNT_ALL", "CLEAR_COUNT", "RST_SET_COUNT",
 
@@ -156,6 +160,7 @@ _FIXTURE_TOKENS = {
     "DUT_SENSOR", "RASTER_STATE",
     "POWER_ON1", "POWER_ON2", "POWER_OFF1", "POWER_OFF2",
     "UART_DL_ON", "UART_DL_OFF",
+
 }
 
 # Các dòng info/boot thường thấy (không phải command list)
