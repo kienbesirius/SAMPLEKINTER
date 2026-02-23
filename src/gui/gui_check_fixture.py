@@ -1482,7 +1482,7 @@ class AppGUI:
                 com1.set_status(status)
                 com1.set_disabled(True)
 
-    def send_to_com(self, cmd: str, on_start, on_success, on_error, on_finally, expect=None, reject=None):
+    def send_to_com(self, cmd: str, on_start, on_success, on_error, on_finally, expect=None, reject=None, take_no_response_as_expect=False):
         def _do():
             if not self.listenport:
                 raise RuntimeError("ListenPort not initialized")
@@ -1492,7 +1492,8 @@ class AppGUI:
                 append_crlf=True, 
                 expect=expect,
                 reject=reject,
-                on_line=lambda s: dispatch(lambda: self._update_logs_panel(f"RX: {s}", "yellow"))
+                on_line=lambda s: dispatch(lambda: self._update_logs_panel(f"RX: {s}", "yellow")),
+                take_no_response_as_expect=take_no_response_as_expect,
             )
             return ok, lines
 
@@ -2367,7 +2368,7 @@ class AppGUI:
         def _finally(_meta):
             self._task_finally_cb(_meta)
 
-        self.send_to_com(case.cmd, on_start=self._task_start_cb, on_success=_ok, on_error=_err, on_finally=_finally, expect=case.expect, reject=case.reject)
+        self.send_to_com(case.cmd, on_start=self._task_start_cb, on_success=_ok, on_error=_err, on_finally=_finally, expect=case.expect, reject=case.reject, take_no_response_as_expect=True)
 
     def _startup_label(self) -> str:
         return "STARTUP: ON" if self.startup_enabled else "STARTUP: OFF"

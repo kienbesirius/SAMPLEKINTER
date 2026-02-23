@@ -229,6 +229,7 @@ class ListenPort:
         append_crlf: bool = True,
         clear_before_send: bool = True,
         on_line: Optional[Callable[[str], None]] = None,  # <-- emit realtime (per-command)
+        take_no_response_as_expect: bool = False,
     ) -> Tuple[bool, List[str]]:
         """
         Gom response theo từng command (dựa trên seq0), không phụ thuộc last_rx_time global.
@@ -306,6 +307,9 @@ class ListenPort:
 
         # timeout
         ok = matched if expect is not None else got_any
+        # chỉ coi là OK khi KHÔNG có response thuộc command
+        if take_no_response_as_expect and (not out_lines):
+            ok = True
         return ok, out_lines
 
 
