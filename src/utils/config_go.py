@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import configparser
 from dataclasses import dataclass
-from typing import Dict, Any, Tuple, Union, Literal, Optional, Set
+from typing import Dict, Any, Tuple, Union, Literal, Optional, Set, List
 import os
 import re
 import tempfile
@@ -621,3 +621,110 @@ def update_ini_manual_slot_info(
 
     out_text = newline.join(lines) + newline
     _atomic_write_text(path, out_text, encoding=encoding)
+
+# ===================== STATION CONFIG =====================
+
+_STATION_CMD_KEYS: Tuple[str, ...] = (
+    # commands
+    "open_cmd",
+    "close_cmd",
+    "status_cmd",
+    "raster_state_cmd",
+
+    # fallback patterns
+    "expect",
+    "reject",
+
+    # per-case patterns (recommend)
+    "sensor_expect",
+    "sensor_reject",
+    "stop_expect",
+    "stop_reject",
+    "raster_expect",
+    "raster_reject",
+)
+
+@dataclass(frozen=True)
+class Station:
+    name: str
+    cmds: Dict[str, str]  # keys cố định theo _STATION_CMD_KEYS
+
+
+def _split_csv(s: str) -> List[str]:
+    # "AFT, ADL1,ADL2" -> ["AFT","ADL1","ADL2"]
+    out: List[str] = []
+    for p in (s or "").split(","):
+        p = p.strip()
+        if p:
+            out.append(p)
+    return out
+
+
+def load_station_cfg(
+    path: Union[str, Path],
+    *,
+    encoding: str = "utf-8",
+    station_root_section: str = "STATION",
+    station_prefix: str = "STATION_",
+    cmd_keys: Tuple[str, ...] = _STATION_CMD_KEYS,
+) -> Tuple[Optional[str], List[Station], Dict[str, Station]]:
+    """
+    Return: (selected_station_name, stations_list, station_map)
+
+    - Ưu tiên đọc thứ tự từ [STATION].stations (csv)
+    - Fallback: scan all sections STATION_<NAME>
+    - Mỗi station có cmds dict với keys cố định trong cmd_keys
+    """
+    cfg = configparser.ConfigParser(strict=False)
+    cfg.read(str(path), encoding=encoding)
+
+    selected = cfg.get(station_root_section, "selected_station", fallback="").strip() or None
+
+    # 1) lấy list station theo order nếu có
+    station_names: List[str] = []
+    if cfg.has_section(station_root_section):
+        station_names = _split_csv(cfg.get(station_root_section, "stations", fallback=""))
+
+    # 2) fallback scan nếu list rỗng
+    if not station_names:
+        for sec in cfg.sections():
+            if sec.upper().startswith(station_prefix.upper()):
+                name = sec[len(station_prefix):].strip()
+                if name:
+                    station_names.append(name)
+
+        station_names.sort(key=lambda x: x.upper())
+
+    stations: List[Station] = []
+    station_map: Dict[str, Station] = {}
+
+    for name in station_names:
+        sec = f"{station_prefix}{name}"
+        if not cfg.has_section(sec):
+            # nếu config khai báo stations=... nhưng thiếu section -> vẫn tạo object rỗng để bạn detect
+            cmds = {k: "" for k in cmd_keys}
+            st = Station(name=name, cmds=cmds)
+            stations.append(st)
+            station_map[name] = st
+            continue
+
+        cmds: Dict[str, str] = {}
+        for k in cmd_keys:
+            cmds[k] = cfg.get(sec, k, fallback="").strip()
+
+        st = Station(name=name, cmds=cmds)
+        stations.append(st)
+        station_map[name] = st
+
+    return selected, stations, station_map
+
+
+def get_selected_station(
+    path: Union[str, Path],
+    *,
+    encoding: str = "utf-8",
+) -> Optional[Station]:
+    selected, _stations, mp = load_station_cfg(path, encoding=encoding)
+    if not selected:
+        return None
+    return mp.get(selected)

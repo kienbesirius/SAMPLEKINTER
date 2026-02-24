@@ -411,6 +411,7 @@ class AppGUI:
         # Logout the width height screen
         self._update_logs_panel(f"screen_width: {self.screen_width} | screen_height: {self.screen_height}", "green")
         self._update_logs_panel(f"canvas_width: {self._canvas.winfo_width()} | canvas_height: {self._canvas.winfo_height()}", "green")
+        
 
     def _wd_do_register(self) -> None:
         pid = os.getpid()
@@ -651,18 +652,21 @@ class AppGUI:
         selected_station = bind_canvas_text(
             root=win,
             canvas=canvas,
-            tag="admin_stop",
+            tag="select_station",
             x=credit_x_axis,
             y=credit_y_axis,
             text=("Station: "),
             text_font=("Tektur", 12, "bold"),
-            fill=("#E1163F"),
-            active_fill="#FFD24A",
+            fill=("#7CFF7C"),
+            active_fill="#FFFFFF",
             disabled_fill="#CFCFCF",
             cooldown_ms=1250,
             anchor="nw",
             command=(lambda w=win: self.select_station(win=w)),
         )
+        
+        self._init_station_text(selected_station)
+
         widgets["selected_station"] = selected_station
 
         fixture_dummy = bind_canvas_asset(
@@ -727,6 +731,25 @@ class AppGUI:
 
         return widgets
     
+    def _init_station_text(self, text_station):
+        from pathlib import Path
+        from src.utils.config_go import load_station_cfg
+
+        cfg_path = Path(app_dir()) / "config.ini"
+        selected_name, stations, mp = load_station_cfg(cfg_path)
+
+        # chọn hợp lệ
+        name = selected_name
+        if not name or (name not in mp):
+            name = stations[0].name if stations else ""
+            # nếu muốn persist luôn default:
+            if name:
+                try:
+                    self._ini_set_selected_station(name)
+                except Exception:
+                    pass
+                
+        text_station.configure(text=f"Station: {name}" if name else "Station: (none)")
 
     def _fixture_dummy_key_for_case(self, case: GuideCase | None) -> str:
         if not case:
@@ -787,9 +810,6 @@ class AppGUI:
     def _draw_guide(self, canvas: tk.Canvas):
         pass 
     
-    def select_station(self ):
-        pass
-
     def admin_terminate(self, win=None):
         if not getattr(self, "is_admin", False):
             return
@@ -1417,6 +1437,289 @@ class AppGUI:
 
 
 
+    def select_station(self, win: tk.Misc | None = None):
+        import tkinter as tk
+        from pathlib import Path
+        from src.utils.config_go import load_station_cfg
+
+        win = win or self.root
+        modal = self._get_modal(win)
+        if not modal:
+            return
+
+        cfg_path = Path(app_dir()) / "config.ini"
+        selected_name, stations, _mp = load_station_cfg(cfg_path)
+
+        # nếu config chưa có selected -> default = station đầu tiên (UI sẽ dirty=False)
+        base_selected = selected_name or (stations[0].name if stations else "")
+
+        # ===== THEME =====
+        BG = "#111111"
+        PANEL = "#1A1A1A"
+        ITEM_BG = "#000000"
+        ITEM_HOVER = "#222222"
+        SEL_BG = "#FFD24A"
+        SEL_FG = "#471800"
+        TXT = "white"
+
+        modal.clear_dialog()
+
+        # ===== Dialog Canvas (để đặt title + buttons theo style assets) =====
+        dlg_w, dlg_h = 520, 430
+        dlg_canvas = tk.Canvas(
+            modal.dialog, width=dlg_w, height=dlg_h,
+            bg=PANEL, highlightthickness=0, bd=0
+        )
+        dlg_canvas.pack(padx=18, pady=14)
+
+        # Title
+        dlg_canvas.create_text(
+            dlg_w // 2, 28,
+            text="Danh sách trạm fixture",
+            fill="white",
+            font=("Tektur", 16, "bold"),
+            anchor="n",
+        )
+
+        # ===== list frame nằm trong canvas =====
+        list_frame = tk.Frame(dlg_canvas, bg=PANEL)
+        list_frame_id = dlg_canvas.create_window(
+            dlg_w // 2, 70,
+            window=list_frame,
+            anchor="n",
+            width=dlg_w - 36,
+            height=300,
+        )
+
+        # ============ Scroll list (custom list) ============
+        list_wrap = tk.Frame(list_frame, bg=PANEL)
+        list_wrap.pack(fill="both", expand=True)
+
+        cv_list = tk.Canvas(
+            list_wrap,
+            width=dlg_w - 60,
+            height=300,
+            bg=BG,
+            highlightthickness=0,
+            bd=0,
+        )
+        sb = tk.Scrollbar(list_wrap, orient="vertical", command=cv_list.yview)
+        cv_list.configure(yscrollcommand=sb.set)
+
+        cv_list.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y", padx=(8, 0))
+
+        inner = tk.Frame(cv_list, bg=BG)
+        inner_id = cv_list.create_window((0, 0), window=inner, anchor="nw")
+
+        def _sync_width(_e=None):
+            try:
+                cv_list.itemconfigure(inner_id, width=cv_list.winfo_width())
+            except Exception:
+                pass
+
+        def _sync_scrollregion(_e=None):
+            cv_list.configure(scrollregion=cv_list.bbox("all"))
+
+        inner.bind("<Configure>", _sync_scrollregion)
+        cv_list.bind("<Configure>", _sync_width)
+
+        # mousewheel scroll
+        def _on_mousewheel(e):
+            if getattr(e, "delta", 0):
+                cv_list.yview_scroll(int(-1 * (e.delta / 120)), "units")
+            return "break"
+        def _on_linux_up(_e): cv_list.yview_scroll(-2, "units"); return "break"
+        def _on_linux_dn(_e): cv_list.yview_scroll(+2, "units"); return "break"
+
+        cv_list.bind_all("<MouseWheel>", _on_mousewheel)
+        cv_list.bind_all("<Button-4>", _on_linux_up)
+        cv_list.bind_all("<Button-5>", _on_linux_dn)
+
+        # ===== Build items =====
+        cur = {"name": base_selected}
+        item_refs = {}
+
+        def _apply_style(name: str):
+            for n, (fr, lb) in item_refs.items():
+                if n == name:
+                    fr.configure(bg=SEL_BG)
+                    lb.configure(bg=SEL_BG, fg=SEL_FG)
+                else:
+                    fr.configure(bg=ITEM_BG)
+                    lb.configure(bg=ITEM_BG, fg=TXT)
+
+        # ---- dirty UI ----
+        dirty = {"on": False}
+        btn_confirm = None
+        btn_cancel = None
+        btn_gap = 170           # giãn 2 nút ra chút
+        btn_y   = dlg_h - 30    # kéo xuống sát đáy dialog hơn (tùy bạn 26~36)
+        cx      = dlg_w // 2
+
+        def _set_btn_visible(btn, on: bool):
+            try:
+                # bind_canvas_button thường trả dict hoặc object có set_state/hide/show
+                if hasattr(btn, "set_state"):
+                    btn.set_state("normal" if on else "hidden")
+                elif hasattr(btn, "show") and hasattr(btn, "hide"):
+                    btn.show() if on else btn.hide()
+                else:
+                    # fallback: nếu btn là list item ids/tags
+                    state = "normal" if on else "hidden"
+                    try:
+                        dlg_canvas.itemconfig(btn, state=state)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        def _set_dirty(on: bool):
+            if dirty["on"] == on:
+                return
+            dirty["on"] = on
+
+            # Confirm chỉ hiện khi dirty
+            if btn_confirm is not None:
+                _set_btn_visible(btn_confirm, on)
+
+            # Cancel: dirty -> sang phải, không dirty -> giữa
+            if btn_cancel is not None:
+                x = (cx + btn_gap // 2) if on else cx
+                if hasattr(btn_cancel, "move_to"):
+                    btn_cancel.move_to(x, btn_y)
+
+            # Confirm: dirty -> bên trái
+            if btn_confirm is not None and on:
+                if hasattr(btn_confirm, "move_to"):
+                    btn_confirm.move_to(cx - btn_gap // 2, btn_y)
+
+        def _choose(name: str):
+            cur["name"] = name
+            _apply_style(name)
+            _set_dirty(name != base_selected)
+
+        def _mk_item(name: str):
+            fr = tk.Frame(inner, bg=ITEM_BG, highlightthickness=0)
+            fr.pack(fill="x", padx=10, pady=4)
+
+            lb = tk.Label(
+                fr,
+                text=name,
+                bg=ITEM_BG,
+                fg=TXT,
+                font=("Tektur", 12, "bold"),
+                anchor="w",
+                padx=12,
+                pady=8,
+            )
+            lb.pack(fill="x")
+
+            def _enter(_e=None):
+                if cur["name"] != name:
+                    fr.configure(bg=ITEM_HOVER)
+                    lb.configure(bg=ITEM_HOVER)
+
+            def _leave(_e=None):
+                if cur["name"] != name:
+                    fr.configure(bg=ITEM_BG)
+                    lb.configure(bg=ITEM_BG)
+
+            def _click(_e=None):
+                _choose(name)
+
+            for w in (fr, lb):
+                w.bind("<Enter>", _enter)
+                w.bind("<Leave>", _leave)
+                w.bind("<Button-1>", _click)
+
+            item_refs[name] = (fr, lb)
+
+        if not stations:
+            tk.Label(
+                inner,
+                text="(Không có station trong config.ini)",
+                fg="white",
+                bg=BG,
+                font=("Tektur", 12, "bold"),
+            ).pack(padx=12, pady=12)
+        else:
+            for st in stations:
+                _mk_item(st.name)
+            _apply_style(cur["name"])
+            _set_dirty(False)
+
+        # ===== Buttons (bind_canvas_button) =====
+        # bạn đang có _pick_btn_key / bind_canvas_button ở scope class -> dùng luôn
+        def _cancel():
+            try:
+                cv_list.unbind_all("<MouseWheel>")
+                cv_list.unbind_all("<Button-4>")
+                cv_list.unbind_all("<Button-5>")
+            except Exception:
+                pass
+            modal.hide()
+
+        def _confirm():
+            name = cur["name"]
+            if name:
+                # update label Station ngay
+                try:
+                    for w in self._iter_windows():
+                        ws = self._get_widgets(w)
+                        t = ws.get("selected_station")
+                        if t:
+                            t.configure(text=f"Station: {name}")
+                except Exception:
+                    pass
+
+                # lưu ini
+                try:
+                    self._ini_set_selected_station(name)
+                except Exception:
+                    pass
+
+            _cancel()
+
+        # Confirm: mặc định ẩn, chỉ hiện khi dirty
+        btn_confirm = bind_canvas_button(
+            root=modal.dialog,
+            canvas=dlg_canvas,
+            assets=self.assets,
+            tag=f"dlg_station_confirm",
+            x=cx - btn_gap,
+            y=btn_y,
+            normal_status="fixture_button_confirm_normal",
+            hover_status="fixture_button_confirm_hover",
+            active_status="fixture_button_confirm_pressed",
+            disabled_status="fixture_button_confirm_disabled",
+            text="",
+            text_font=getattr(self, "tektur_font", None),
+            command=_confirm,
+            cooldown_ms=900,
+        )
+        _set_btn_visible(btn_confirm, False)  # hidden by default
+
+        # Cancel: luôn hiện (dirty=False -> ở giữa)
+        btn_cancel = bind_canvas_button(
+            root=modal.dialog,
+            canvas=dlg_canvas,
+            assets=self.assets,
+            tag=f"dlg_station_cancel",
+            x=cx,
+            y=btn_y,
+            normal_status="fixture_button_cancel_normal",
+            hover_status="fixture_button_cancel_hover",
+            active_status="fixture_button_cancel_pressed",
+            disabled_status="fixture_button_cancel_disabled",
+            text="",
+            text_font=getattr(self, "tektur_font", None),
+            command=_cancel,
+            cooldown_ms=900,
+        )
+
+        modal.show(dim_level=0.45)
+        
     def _get_modal(self, win: tk.Misc) -> "ModalOverlay | None":
         ws = self._get_widgets(win)
         return ws.get("modal")
@@ -2015,29 +2318,29 @@ class AppGUI:
             title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc trên trái ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
             # expect = re.compile(r"ok", re.I)
             ## TODO: CATCH patterns
-            expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error||NG)\b", re.I)
+            expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
             reject = re.compile(r"\b(?:OK|ok|READY|close|CLOSED|Closed)\b", re.I)
         elif "SENSOR TOP RIGHT" in label:
             img = "guide_sensor_top_right"
             title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc trên phải ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
             ## TODO: CATCH patterns
-            expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error||NG)\b", re.I)
+            expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
             reject = re.compile(r"\b(?:OK|ok|READY|close|CLOSED|Closed)\b", re.I)
         elif "SENSOR BOT LEFT" in label:
             img = "guide_sensor_bottom_left"
             title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc dưới trái ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
             # theo dummy fixture bạn đã mô tả: có thể trả STOPPED/NG/timeout/EMC
-            expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error||NG)\b", re.I)
+            expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
             reject = re.compile(r"\b(?:OK|ok|READY|close|CLOSED|Closed)\b", re.I)
         elif "SENSOR BOT RIGHT" in label:
             img = "guide_sensor_bottom_right"
             title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc dưới phải ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
-            expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error||NG)\b", re.I)
+            expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
             reject = re.compile(r"\b(?:OK|ok|READY|close|CLOSED|Closed)\b", re.I)
         elif "SENSOR" in up_cmd:
             img = "guide_close_fixture"
             title = f"[Slot{slot_id}] Hãy dùng công cụ che SENSOR ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
-            expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error||NG)\b", re.I)
+            expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
             reject = re.compile(r"\b(?:OK|ok|READY|close|CLOSED|Closed)\b", re.I)
 
         elif "STOP" in label or "FORCE STOP" in label:
@@ -2057,6 +2360,23 @@ class AppGUI:
             reject=reject,
         )
 
+    def _ini_set_selected_station(self, station_name: str) -> None:
+        """Update [STATION].selected_station trong config.ini."""
+        import configparser
+        from pathlib import Path
+
+        cfg_path = Path(app_dir()) / "config.ini"
+        cfg = configparser.ConfigParser(strict=False)
+        cfg.read(str(cfg_path), encoding="utf-8")
+
+        if not cfg.has_section("STATION"):
+            cfg.add_section("STATION")
+
+        cfg.set("STATION", "selected_station", station_name)
+
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            cfg.write(f)
+            
     def _guide_build_plan(self) -> list[GuideCase]:
         """Đọc config.ini và build plan các slot có nội dung test."""
         try:

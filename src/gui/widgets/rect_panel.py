@@ -146,6 +146,8 @@ class CenterRectPanel:
         self._request_redraw()
 
     def _request_redraw(self) -> None:
+        if self._suspended or (not self._shown):
+            return
         if self._after_redraw:
             return
         try:
@@ -156,11 +158,26 @@ class CenterRectPanel:
     def _redraw_now(self) -> None:
         self._after_redraw = None
 
+        if self._suspended or (not self._shown):
+            return
+
+        try:
+            if not self.root.winfo_exists():
+                return
+            if not self.canvas.winfo_exists():
+                return
+        except Exception:
+            return
+
         if not self._shown:
             return
 
-        W = int(self.canvas.winfo_width() or 0)
-        H = int(self.canvas.winfo_height() or 0)
+        try:
+            W = int(self.canvas.winfo_width() or 0)
+            H = int(self.canvas.winfo_height() or 0)
+        except tk.TclError:
+            return
+        
         if W <= 2 or H <= 2:
             # geometry chưa sẵn sàng -> thử lại
             try:
@@ -230,7 +247,27 @@ class CenterRectPanel:
         self._shown = False
         self.set_state("hidden")
 
+    # def destroy(self) -> None:
+    #     try:
+    #         self.canvas.delete(self.tag)
+    #     except Exception:
+    #         pass
+    #     try:
+    #         self.body.destroy()
+    #     except Exception:
+    #         pass
+
     def destroy(self) -> None:
+        self._shown = False
+        self._suspended = True
+
+        try:
+            if self._after_redraw:
+                self.root.after_cancel(self._after_redraw)
+        except Exception:
+            pass
+        self._after_redraw = None
+
         try:
             self.canvas.delete(self.tag)
         except Exception:
@@ -239,13 +276,25 @@ class CenterRectPanel:
             self.body.destroy()
         except Exception:
             pass
-
+        
     def redraw(self) -> None:
         if not self._shown:
             return
 
-        W = max(2, int(self.canvas.winfo_width() or self.root.winfo_width() or 2))
-        H = max(2, int(self.canvas.winfo_height() or self.root.winfo_height() or 2))
+        try:
+            if not self.root.winfo_exists():
+                return
+            if not self.canvas.winfo_exists():
+                return
+        except Exception:
+            return
+
+        try:
+            W = max(2, int(self.canvas.winfo_width() or self.root.winfo_width() or 2))
+            H = max(2, int(self.canvas.winfo_height() or self.root.winfo_height() or 2))
+        except tk.TclError:
+            return
+        
         cx, cy = W / 2.0, H / 2.0
 
         inner = int(self.style.inner_pad)
@@ -396,17 +445,17 @@ class CenterRectPanel:
         self.canvas.itemconfig(self.win_id, width=body_w, height=body_h)
 
 
-    # -------------------------
-    # events
-    # -------------------------
-    def _on_resize(self, _e=None) -> None:
-        # root resize => redraw
-        try:
-            if not self.root.winfo_exists():
-                return
-        except Exception:
-            return
-        self.redraw()
+    # # -------------------------
+    # # events
+    # # -------------------------
+    # def _on_resize(self, _e=None) -> None:
+    #     # root resize => redraw
+    #     try:
+    #         if not self.root.winfo_exists():
+    #             return
+    #     except Exception:
+    #         return
+    #     self.redraw()
 
 
 def bind_center_rect_panel(
