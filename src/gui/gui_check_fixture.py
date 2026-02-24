@@ -117,8 +117,9 @@ def obtaining_fixture_com(emit=print, cancel_event: threading.Event=None, progre
             if progress_cb:
                 progress_cb({"message": f"Checking {port}..."})
             found = get_fixture_port(port)
-            parsed = parse_fixture_port_text(found)
+            
             if found:
+                parsed = parse_fixture_port_text(found)
                 emit("Found fixture on COM:", port)
                 if progress_cb:
                     progress_cb({
@@ -646,6 +647,24 @@ class AppGUI:
 
         widgets["admin_stop"] = admin_stop
 
+        credit_y_axis -= 24
+        selected_station = bind_canvas_text(
+            root=win,
+            canvas=canvas,
+            tag="admin_stop",
+            x=credit_x_axis,
+            y=credit_y_axis,
+            text=("Station: "),
+            text_font=("Tektur", 12, "bold"),
+            fill=("#E1163F"),
+            active_fill="#FFD24A",
+            disabled_fill="#CFCFCF",
+            cooldown_ms=1250,
+            anchor="nw",
+            command=(lambda w=win: self.select_station(win=w)),
+        )
+        widgets["selected_station"] = selected_station
+
         fixture_dummy = bind_canvas_asset(
             root=win,
             canvas=canvas,
@@ -768,6 +787,9 @@ class AppGUI:
     def _draw_guide(self, canvas: tk.Canvas):
         pass 
     
+    def select_station(self ):
+        pass
+
     def admin_terminate(self, win=None):
         if not getattr(self, "is_admin", False):
             return

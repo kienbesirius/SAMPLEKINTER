@@ -18,7 +18,7 @@ class ScheduleCfg:
 
     def __post_init__(self):
         if self.times is None:
-            self.times = [(6, 0), (18, 0)]
+            self.times = [(6, 0), (12, 0), (18, 0), (0, 0)]
 
 def is_windows() -> bool:
     return platform.system().lower().startswith("win")

@@ -143,12 +143,12 @@ def main() -> None:
             # --- CASES bạn yêu cầu ---
             if cmd == "IN CLOSE" or cmd == "CLOSE" or cmd == "IN":
                 print("RX 'IN CLOSE' -> close fixture ok")
-                _send_line(ser, "ok")
+                _send_line(ser, "error")
                 return
 
             if cmd == "OUT OPEN" or cmd == "OPEN" or cmd == "OUT":
                 print("RX 'OUT OPEN' -> open fixture ok")
-                _send_line(ser, "open fixture ok")
+                _send_line(ser, "error")
                 return
 
             if cmd == "FORCE STOP":
