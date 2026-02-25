@@ -31,13 +31,13 @@ from src.gui.fixture.fill_multiple_monitor import fullscreen_on_monitor, get_mon
 from src.gui.fixture.get_fixture_port import get_fixture_port, parse_fixture_port_text
 from src.gui.fixture.get_serial_list import get_serial_ports
 from src.gui.fixture.listen_port import ListenPort
-from src.utils.config_go import load_fixture_cfg, choose_slot_font, reset_slot_status_section_to_idle, update_ini_slot_status, load_slot_status_from_ini, SlotStatus, _ALLOWED_STATUS, update_ini_fixture_section, update_ini_manual_slot_info
+from src.utils.config_go import load_fixture_cfg, choose_slot_font, reset_slot_status_section_to_idle, update_ini_slot_status, load_slot_status_from_ini, SlotStatus, _ALLOWED_STATUS, update_ini_fixture_section, update_ini_manual_slot_info, update_ini_slot_guide
 from src.gui.widgets.dialog import ModalOverlay
 import tkinter.font as tkfont
 from src.watchdog.watchdog_gui import wd_register, wd_heartbeat, wd_complete
 from src.watchdog.watchdog_gui import ensure_watchdog_running_auto
 from collections import deque
-
+from src.utils.config_go import load_station_cfg
 @dataclass
 class GuideCase:
     """Một case kiểm tra gắn với 1 slot trong luồng GuidePanel."""
@@ -733,7 +733,7 @@ class AppGUI:
     
     def _init_station_text(self, text_station):
         from pathlib import Path
-        from src.utils.config_go import load_station_cfg
+        
 
         cfg_path = Path(app_dir()) / "config.ini"
         selected_name, stations, mp = load_station_cfg(cfg_path)
@@ -1694,6 +1694,11 @@ class AppGUI:
                             slot_test=st.slot_test.get(i, ""),
                             slot_cmd=st.slot_command.get(i, ""),
                         )
+                        update_ini_slot_guide(
+                            cfg_path,
+                            slot_idx=i,
+                            guide_text=st.slot_guide.get(i, ""),
+                        )
                 except Exception:
                     pass
 
@@ -2421,9 +2426,10 @@ class AppGUI:
             except Exception:
                 pass
 
-    def _guide_make_case(self, slot_id: int, slot_label: str, slot_cmd0: str) -> GuideCase:
+    def _guide_make_case(self, slot_id: int, slot_label: str, slot_cmd0: str, guide_text: str = "", expect_regex: str = "NG", reject_regex: str = "OK") -> GuideCase:
         label = (slot_label or "").strip().upper()
         cmd0 = (slot_cmd0 or "").strip()
+        guide = (guide_text or "").strip()
         # --- choose cmd ---
         cmd = cmd0
         if not cmd:
@@ -2446,52 +2452,80 @@ class AppGUI:
         # --- choose expect + image + title ---
         img = "fixture_240x240"
         title = f"[Slot{slot_id}] {label or 'CHECK'}"
+        # nếu ini có guide -> ưu tiên dùng
+        if guide:
+            title = f"[Slot{slot_id}] {guide}"
         expect: Optional[Pattern[str]] = None
         reject: Optional[Pattern[str]] = None
 
+
+        # --- compile expect/reject from config ---
+        def _compile_pat(s: str, *, fallback: str) -> Optional[Pattern[str]]:
+            s = (s or "").strip()
+            if not s:
+                return None
+            try:
+                return re.compile(s)
+            except re.error:
+                # fallback an toàn nếu regex lỗi
+                try:
+                    return re.compile(fallback, re.I)
+                except re.error:
+                    return None
+
+        # Mặc định: config bạn hay dùng (?i) trong pattern, nên compile() là đủ.
+        # Nếu user chỉ đưa "NG" thì compile("NG") là OK, match substring.
+        expect = _compile_pat(expect_regex, fallback=r"(?i)\bNG\b")
+        reject = _compile_pat(reject_regex, fallback=r"(?i)\bOK\b")
+
+        print(
+            f"Making guide case for Slot{slot_id}: "
+            f"label={label!r}, cmd={cmd!r}, "
+            f"expect={expect_regex!r}, reject={reject_regex!r}"
+        )
 
         ## TODO: CATCH patterns
         # OK_WORDS = ["ok", "pass", "passed", "success", "done"]
         # expect = re.compile(r"\b(?:%s)\b" % "|".join(map(re.escape, OK_WORDS)), re.I)
         # reject = re.compile(r"\b(?:OK|ok|True|true|closed|CLOSED|Closed)\b", re.I)
-        up_cmd = cmd.strip().upper()
+        # up_cmd = cmd.strip().upper()
 
-        if "SENSOR TOP LEFT" in label:
-            img = "guide_sensor_top_left"
-            title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc trên trái ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
-            # expect = re.compile(r"ok", re.I)
-            ## TODO: CATCH patterns
-            expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
-            reject = re.compile(r"\b(?:OK|ok|READY|close|CLOSED|Closed)\b", re.I)
-        elif "SENSOR TOP RIGHT" in label:
-            img = "guide_sensor_top_right"
-            title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc trên phải ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
-            ## TODO: CATCH patterns
-            expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
-            reject = re.compile(r"\b(?:OK|ok|READY|close|CLOSED|Closed)\b", re.I)
-        elif "SENSOR BOT LEFT" in label:
-            img = "guide_sensor_bottom_left"
-            title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc dưới trái ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
-            # theo dummy fixture bạn đã mô tả: có thể trả STOPPED/NG/timeout/EMC
-            expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
-            reject = re.compile(r"\b(?:OK|ok|READY|close|CLOSED|Closed)\b", re.I)
-        elif "SENSOR BOT RIGHT" in label:
-            img = "guide_sensor_bottom_right"
-            title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc dưới phải ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
-            expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
-            reject = re.compile(r"\b(?:OK|ok|READY|close|CLOSED|Closed)\b", re.I)
-        elif "SENSOR" in up_cmd:
-            img = "guide_close_fixture"
-            title = f"[Slot{slot_id}] Hãy dùng công cụ che SENSOR ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
-            expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
-            reject = re.compile(r"\b(?:OK|ok|READY|close|CLOSED|Closed)\b", re.I)
+        # if "SENSOR TOP LEFT" in label:
+        #     img = "guide_sensor_top_left"
+        #     title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc trên trái ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
+        #     # expect = re.compile(r"ok", re.I)
+        #     ## TODO: CATCH patterns
+        #     expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
+        #     reject = re.compile(r"\b(?:OK|ok|READY|close|CLOSED|Closed)\b", re.I)
+        # elif "SENSOR TOP RIGHT" in label:
+        #     img = "guide_sensor_top_right"
+        #     title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc trên phải ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
+        #     ## TODO: CATCH patterns
+        #     expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
+        #     reject = re.compile(r"\b(?:OK|ok|READY|close|CLOSED|Closed)\b", re.I)
+        # elif "SENSOR BOT LEFT" in label:
+        #     img = "guide_sensor_bottom_left"
+        #     title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc dưới trái ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
+        #     # theo dummy fixture bạn đã mô tả: có thể trả STOPPED/NG/timeout/EMC
+        #     expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
+        #     reject = re.compile(r"\b(?:OK|ok|READY|close|CLOSED|Closed)\b", re.I)
+        # elif "SENSOR BOT RIGHT" in label:
+        #     img = "guide_sensor_bottom_right"
+        #     title = f"[Slot{slot_id}] Hãy dùng công cụ che Cảm Biến góc dưới phải ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
+        #     expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
+        #     reject = re.compile(r"\b(?:OK|ok|READY|close|CLOSED|Closed)\b", re.I)
+        # elif "SENSOR" in up_cmd:
+        #     img = "guide_close_fixture"
+        #     title = f"[Slot{slot_id}] Hãy dùng công cụ che SENSOR ở cửa vào Fixture.\nBấm xác nhận để kiểm tra!"
+        #     expect = re.compile(r"\b(?:no\s+product1!|PRODUCT_NG|FIX_SAFE_NG|CLOSE_NG|error|sensor\s+error|NG)\b", re.I)
+        #     reject = re.compile(r"\b(?:OK|ok|READY|close|CLOSED|Closed)\b", re.I)
 
-        elif "STOP" in label or "FORCE STOP" in label:
-            img = "fixture_stop_guide_240x240"
-            title = f"[Slot{slot_id}] Hãy nhấn nút FORCE STOP - DỪNG KHẨN CẤP.\nBấm xác nhận để kiểm tra!"
-            expect = re.compile(r"\b(?:not\s+ok|fail(?:ed)?|ng|error|timeout|EMC|emc|STOPPED|STOP_ON|STOP!|HOLD_ON|stop|E_STOP|RASTER_ERROR|NG)\b", re.I)
-            # expect = re.compile(r"OK", re.I)
-            # reject = re.compile(r"\b(?:OK|ok)\b", re.I)
+        # elif "STOP" in label or "FORCE STOP" in label:
+        #     img = "fixture_stop_guide_240x240"
+        #     title = f"[Slot{slot_id}] Hãy nhấn nút FORCE STOP - DỪNG KHẨN CẤP.\nBấm xác nhận để kiểm tra!"
+        #     expect = re.compile(r"\b(?:not\s+ok|fail(?:ed)?|ng|error|timeout|EMC|emc|STOPPED|STOP_ON|STOP!|HOLD_ON|stop|E_STOP|RASTER_ERROR|NG)\b", re.I)
+        #     # expect = re.compile(r"OK", re.I)
+        #     # reject = re.compile(r"\b(?:OK|ok)\b", re.I)
 
         return GuideCase(
             slot_id=slot_id,
@@ -2532,10 +2566,37 @@ class AppGUI:
         if fx is not None:
             for slot_id in range(1, 13):
                 lbl = (fx.slot_text.get(slot_id, "") or "").strip()
+                
                 if not lbl:
                     continue
                 cmd0 = (fx.slot_command.get(slot_id, "") or "").strip()
-                plan.append(self._guide_make_case(slot_id, lbl, cmd0))
+                guide = (fx.slot_guide.get(slot_id, "") or "").strip()
+                # lấy station hiện tại
+                selected, stations, station_map = load_station_cfg(self.cfg_path)
+                st = station_map.get(selected or "")
+
+                expect_s = ""
+                reject_s = ""
+                if st:
+                    up_label = (lbl or "").upper()
+                    up_cmd = (cmd0 or "").upper()
+
+                    if "STOP" in up_label or "FORCE" in up_label:
+                        expect_s = st.cmds.get("stop_expect", "")
+                        reject_s = st.cmds.get("stop_reject", "")
+                    elif "SENSOR" in up_label:
+                        expect_s = st.cmds.get("sensor_expect", "")
+                        reject_s = st.cmds.get("sensor_reject", "")
+                    elif "RASTER" in up_cmd or "RASTER" in up_label:
+                        expect_s = st.cmds.get("raster_expect", "")
+                        reject_s = st.cmds.get("raster_reject", "")
+                    else:
+                        expect_s = st.cmds.get("expect", "")
+                        reject_s = st.cmds.get("reject", "")
+                        
+                plan.append(self._guide_make_case(slot_id, lbl, cmd0,guide_text=guide,
+                    expect_regex=expect_s,
+                    reject_regex=reject_s,))
 
         # fallback tối thiểu (để không crash UI)
         if not plan:

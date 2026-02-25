@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from typing import Dict, Any, Tuple, Union, Literal, Optional, Set, List
 import os
 import re
+import csv
+from io import StringIO
 import tempfile
 from pathlib import Path
 
@@ -32,6 +34,7 @@ class FixtureConfig:
     slot_text: Dict[int, str]
     slot_command: Dict[int, str]
     slot_status: Dict[int, str] 
+    slot_guide: Dict[int, str]   # NEW
 
 def load_fixture_cfg(path: str) -> FixtureConfig:
     # strict=False để không crash nếu config có key trùng (slot8 bị lặp)
@@ -48,10 +51,18 @@ def load_fixture_cfg(path: str) -> FixtureConfig:
     slot_text: Dict[int, str] = {}
     slot_command: Dict[int, str] = {}
     slot_status: Dict[int, str] = {}
+    slot_guide: Dict[int, str] = {}
     for i in range(1, 13):
         slot_text[i] = cfg.get("SLOT_TEST", f"slot{i}", fallback="").strip()
         slot_command[i] = cfg.get("SLOT_COMMAND", f"slot{i}", fallback="").strip()
         slot_status[i] = cfg.get("SLOT_STATUS", f"slot{i}", fallback="idle").strip()
+
+        g = cfg.get("SLOT_GUIDE", f"slot{i}", fallback="").strip()
+        slot_guide[i] = g.replace(r"\n", "\n")
+    # for i in range(1, 13):
+    #     slot_text[i] = cfg.get("SLOT_TEST", f"slot{i}", fallback="").strip()
+    #     slot_command[i] = cfg.get("SLOT_COMMAND", f"slot{i}", fallback="").strip()
+    #     slot_status[i] = cfg.get("SLOT_STATUS", f"slot{i}", fallback="idle").strip()
 
     return FixtureConfig(
         port=port,
@@ -61,6 +72,7 @@ def load_fixture_cfg(path: str) -> FixtureConfig:
         slot_text=slot_text,
         slot_command=slot_command,
         slot_status=slot_status,
+        slot_guide=slot_guide
     )
 
 def update_ini_fixture_section(
@@ -117,6 +129,70 @@ def update_ini_fixture_section(
 
     out_lines = lines[:start] + new_sec + lines[end:]
     out_text = newline.join(out_lines) + newline
+    _atomic_write_text(path, out_text, encoding=encoding)
+
+def update_ini_slot_guide(
+    ini_path: Union[str, Path],
+    *,
+    slot_idx: int,
+    guide_text: str,
+    section_name: str = "SLOT_GUIDE",
+    slots: int = 12,
+    encoding: str = "utf-8",
+) -> None:
+    if not (1 <= int(slot_idx) <= int(slots)):
+        raise ValueError(f"slot_idx out of range: {slot_idx}")
+
+    path = Path(ini_path)
+    if path.exists():
+        raw = path.read_bytes()
+        newline = _detect_newline(raw)
+        lines = raw.decode(encoding, errors="replace").splitlines()
+    else:
+        newline = "\n"
+        lines = []
+
+    # encode \n to literal to keep single-line ini
+    v = (guide_text or "").replace("\n", r"\n")
+
+    # reuse your internal helper pattern from update_ini_manual_slot_info
+    def _upsert(lines_in: list[str]) -> list[str]:
+        start, end = _find_section_bounds(lines_in, section_name)
+        if start is None:
+            if lines_in and lines_in[-1].strip() != "":
+                lines_in.append("")
+            lines_in.append(f"[{section_name}]")
+            start = len(lines_in)
+            end = len(lines_in)
+        if end is None:
+            end = len(lines_in)
+
+        found = False
+        new_sec: list[str] = []
+        for ln in lines_in[start:end]:
+            m = _SLOT_RE.match(ln)
+            if m:
+                indent, key, num_s, eq, _old, trail = m.groups()
+                try:
+                    num = int(num_s)
+                except ValueError:
+                    new_sec.append(ln)
+                    continue
+                if num == int(slot_idx):
+                    new_sec.append(f"{indent}{key}{num}{eq}{v}{trail}")
+                    found = True
+                    continue
+            new_sec.append(ln)
+
+        if not found:
+            if new_sec and new_sec[-1].strip() != "":
+                new_sec.append("")
+            new_sec.append(f"slot{int(slot_idx)}={v}")
+
+        return lines_in[:start] + new_sec + lines_in[end:]
+
+    lines = _upsert(lines)
+    out_text = newline.join(lines) + newline
     _atomic_write_text(path, out_text, encoding=encoding)
 
 def choose_slot_font(label: str) -> Tuple[str, int, str]:
@@ -653,7 +729,7 @@ class Station:
     cmds: Dict[str, str]                 # keys cố định theo _STATION_CMD_KEYS
     slot_test: Dict[int, str]            # slot_idx -> label (trước dấu phẩy)
     slot_command: Dict[int, str]         # slot_idx -> cmd   (sau dấu phẩy)
-
+    slot_guide: Dict[int, str]
 
 def _parse_station_slot_pair(raw: str) -> tuple[str, str]:
     """
@@ -669,6 +745,21 @@ def _parse_station_slot_pair(raw: str) -> tuple[str, str]:
     left, right = s.split(",", 1)
     return left.strip(), right.strip()
 
+def _parse_station_slot_line(v: str) -> tuple[str, str, str]:
+    v = (v or "").strip()
+    if not v:
+        return "", "", ""
+    row = next(csv.reader(StringIO(v), skipinitialspace=True))
+    # row: [test, cmd, guide]  (guide có thể thiếu)
+    test = row[0].strip() if len(row) > 0 else ""
+    cmd  = row[1].strip() if len(row) > 1 else ""
+    guide = row[2] if len(row) > 2 else ""
+    guide = guide.strip()
+    # bỏ quote ngoài nếu còn
+    if len(guide) >= 2 and guide[0] == '"' and guide[-1] == '"':
+        guide = guide[1:-1]
+    guide = guide.replace(r"\n", "\n")
+    return test, cmd, guide
 
 def load_station_cfg(
     path: Union[str, Path],
@@ -718,6 +809,7 @@ def load_station_cfg(
         cmds = {k: "" for k in cmd_keys}
         slot_test: Dict[int, str] = {i: "" for i in range(1, slots + 1)}
         slot_command: Dict[int, str] = {i: "" for i in range(1, slots + 1)}
+        slot_guide: Dict[int, str] = {i: "" for i in range(1, slots + 1)}  # NEW
 
         if cfg.has_section(sec):
             # --- cmds (như cũ) ---
@@ -727,15 +819,17 @@ def load_station_cfg(
             # --- slots (NEW) ---
             for i in range(1, slots + 1):
                 raw = cfg.get(sec, f"slot{i}", fallback="").strip()
-                st, sc = _parse_station_slot_pair(raw)
+                st, sc, gd = _parse_station_slot_line(raw)  # NEW
                 slot_test[i] = st
                 slot_command[i] = sc
+                slot_guide[i] = gd
 
         st_obj = Station(
             name=name,
             cmds=cmds,
             slot_test=slot_test,
             slot_command=slot_command,
+            slot_guide=slot_guide,   # NEW
         )
         stations_list.append(st_obj)
         station_map[name] = st_obj
@@ -766,4 +860,3 @@ def get_selected_station(
     # print(stations_list)
     print(station_map)
     return mp.get(selected)
-
