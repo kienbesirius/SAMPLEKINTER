@@ -31,7 +31,7 @@ from src.gui.fixture.fill_multiple_monitor import fullscreen_on_monitor, get_mon
 from src.gui.fixture.get_fixture_port import get_fixture_port, parse_fixture_port_text
 from src.gui.fixture.get_serial_list import get_serial_ports
 from src.gui.fixture.listen_port import ListenPort
-from src.utils.config_go import load_fixture_cfg, choose_slot_font, reset_slot_status_section_to_idle, update_ini_slot_status, load_slot_status_from_ini, SlotStatus, _ALLOWED_STATUS, update_ini_fixture_section, update_ini_manual_slot_info, update_ini_slot_guide
+from src.utils.config_go import load_fixture_cfg, choose_slot_font, reset_slot_status_section_to_idle, update_ini_slot_status, load_slot_status_from_ini, SlotStatus, _ALLOWED_STATUS, update_ini_fixture_section, update_ini_manual_slot_info, update_ini_slot_guide, update_ini_slot_image
 from src.gui.widgets.dialog import ModalOverlay
 import tkinter.font as tkfont
 from src.watchdog.watchdog_gui import wd_register, wd_heartbeat, wd_complete
@@ -159,6 +159,66 @@ def topmost_window(root):
     except Exception:
         try:
             root.wm_attributes("-topmost", 1)
+        except Exception:
+            pass
+
+
+def topmost_window(win: tk.Misc, on: bool = True, *, reassert: bool = True):
+    val = True if on else False
+
+    # 1) set topmost
+    try:
+        win.attributes("-topmost", val)
+    except Exception:
+        try:
+            win.wm_attributes("-topmost", 1 if on else 0)
+        except Exception:
+            pass
+
+    # 2) lift (focus_force đôi khi gây khó chịu / lỗi trên Linux, nên optional)
+    try:
+        win.lift()
+    except Exception:
+        pass
+
+    # 3) Re-assert đúng 2 lần (KHÔNG gọi lại topmost_window)
+    if reassert:
+        # tránh schedule trùng nếu gọi nhiều lần
+        try:
+            if getattr(win, "_topmost_after_ids", None):
+                for _id in win._topmost_after_ids:
+                    try:
+                        win.after_cancel(_id)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        win._topmost_after_ids = []
+
+        def _reassert_once():
+            # window đã bị destroy thì thôi
+            try:
+                if not win.winfo_exists():
+                    return
+            except Exception:
+                return
+
+            try:
+                win.attributes("-topmost", val)
+            except Exception:
+                try:
+                    win.wm_attributes("-topmost", 1 if on else 0)
+                except Exception:
+                    pass
+            try:
+                win.lift()
+            except Exception:
+                pass
+
+        try:
+            win._topmost_after_ids.append(win.after(50, _reassert_once))
+            win._topmost_after_ids.append(win.after(200, _reassert_once))
         except Exception:
             pass
 
@@ -290,6 +350,8 @@ class AppGUI:
                 self._install_close_guard_for_window(win)
 
                 self.roots_extra.append(win)
+
+                topmost_window(win, True)
             except Exception:
                 pass
             
@@ -721,6 +783,7 @@ class AppGUI:
             on_confirm=self._on_guide_confirm,
             auto_hide_on_done=False,
         )
+
         guide.set_steps(self._build_guide_preview_steps())
         guide.start()
 
@@ -880,9 +943,11 @@ class AppGUI:
 
         def _cancel():
             modal.hide()
+            self._restore_focus_after_modal(win)
 
         def _ok():
             modal.hide()
+            self._restore_focus_after_modal(win)
             # self.reset_slot_status()   # gọi task reset của bạn
 
         tk.Button(row, text="Cancel", command=_cancel, width=10).pack(side="left", padx=8)
@@ -1070,11 +1135,13 @@ class AppGUI:
 
         def _cancel():
             modal.hide()
+            self._restore_focus_after_modal(win)
 
         def _confirm():
             new_test = (txt_entry.get() or "").strip()
             new_cmd = (cmd_entry.get() or "").strip()
             modal.hide()
+            self._restore_focus_after_modal(win)
 
             # TODO: save ini sau - giờ log để verify GUI
             try:
@@ -1241,6 +1308,23 @@ class AppGUI:
                     except Exception:
                         pass
 
+    def _restore_focus_after_modal(self, win):
+        try:
+            ws = self._get_widgets(win)
+            guide = ws.get("fixture_guide") or ws.get("guide")  # tùy bạn đang lưu key gì
+            if guide and hasattr(guide, "focus_default"):
+                win.after(0, guide.focus_default)
+                return
+        except Exception:
+            pass
+
+        # fallback: focus về window
+        try:
+            win.after(0, win.focus_force)
+        except Exception:
+            pass
+                
+                
     def show_admin_auth_dialog(self, *, win: tk.Misc | None = None) -> None:
         """
         Dialog canvas-style: nhập mật khẩu -> toggle self.is_admin -> broadcast lại slots.
@@ -1354,7 +1438,8 @@ class AppGUI:
                 cv.itemconfig(err_id, text=msg)
             except Exception:
                 pass
-
+        
+        
         def _confirm(pw: str = ""):
             pw = (pw or pw_entry.get() or "").strip()
             if not self._verify_admin_password(pw):
@@ -1369,11 +1454,65 @@ class AppGUI:
                 self._update_logs_panel(f"[admin] mode -> {self._admin_mode_label()}", "yellow")
             except Exception:
                 pass
+            
+            # pw_entry.clear()
+            # modal.hide()
+            pw_entry.clear()
+            _close_modal()
 
-            modal.hide()
+        # --- FIX: Enter binding scope + cleanup (Ubuntu/Windows, multi-window safe) ---
+        _dlg = modal.dialog  # Frame/Toplevel container used by modal
+        _bind_ids: list[tuple[str, str]] = []  # (sequence, funcid)
+
+        def _bind_dlg(seq: str, fn):
+            try:
+                fid = _dlg.bind(seq, fn, add="+")
+            except TypeError:
+                fid = _dlg.bind(seq, fn)
+            _bind_ids.append((seq, fid))
+
+        def _unbind_all():
+            for seq, fid in _bind_ids:
+                try:
+                    _dlg.unbind(seq, fid)
+                except Exception:
+                    pass
+            _bind_ids.clear()
+
+        def _close_modal():
+            # unbind enter hooks to avoid "sticky enter" after closing
+            _unbind_all()
+            try:
+                modal.hide()
+                self._restore_focus_after_modal(win)
+            except Exception:
+                pass
+            # return focus to the window that opened dialog
+            try:
+                win.focus_force()
+            except Exception:
+                try:
+                    self.root.focus_force()
+                except Exception:
+                    pass
+
+        def _on_enter(event=None):
+            # Always confirm on Enter in this dialog
+            _confirm()
+            return "break"
+
+        def _on_escape(event=None):
+            _cancel()
+            return "break"
+
+        # bind both Enter keys + Esc on the dialog container (not global)
+        _bind_dlg("<Return>", _on_enter)
+        _bind_dlg("<KP_Enter>", _on_enter)
+        _bind_dlg("<Escape>", _on_escape)
 
         def _cancel():
-            modal.hide()
+            # modal.hide()
+            _close_modal()
 
         # Enter submit
         try:
@@ -1432,7 +1571,8 @@ class AppGUI:
                 pw_entry.widget.focus_set()
             except Exception:
                 pass
-
+        
+        modal.dialog.focus_set()
         modal.show(dim_level=0.45)
 
 
@@ -1659,6 +1799,7 @@ class AppGUI:
             except Exception:
                 pass
             modal.hide()
+            self._restore_focus_after_modal(win)
 
         def _confirm():
             name = cur["name"]
@@ -1699,6 +1840,7 @@ class AppGUI:
                             slot_idx=i,
                             guide_text=st.slot_guide.get(i, ""),
                         )
+                        update_ini_slot_image(cfg_path, slot_idx=i, image_key=st.slot_image.get(i, ""))
                 except Exception:
                     pass
 
@@ -2426,10 +2568,11 @@ class AppGUI:
             except Exception:
                 pass
 
-    def _guide_make_case(self, slot_id: int, slot_label: str, slot_cmd0: str, guide_text: str = "", expect_regex: str = "NG", reject_regex: str = "OK") -> GuideCase:
+    def _guide_make_case(self, slot_id: int, slot_label: str, slot_cmd0: str, guide_text: str = "", image_key: str = "", expect_regex: str = "NG", reject_regex: str = "OK") -> GuideCase:
         label = (slot_label or "").strip().upper()
         cmd0 = (slot_cmd0 or "").strip()
         guide = (guide_text or "").strip()
+        img = (image_key or "").strip() or "fixture_240x240"
         # --- choose cmd ---
         cmd = cmd0
         if not cmd:
@@ -2446,11 +2589,11 @@ class AppGUI:
             else:
                 cmd = label or "IN CLOSE"
 
-        print(f"Making guide case for Slot{slot_id}: label={label!r}, cmd0={cmd0!r}")
+        print(f"Making guide case for Slot{slot_id}: label={label!r}, cmd0={cmd0!r}, img={img!r}")
 
 
         # --- choose expect + image + title ---
-        img = "fixture_240x240"
+        # img = "fixture_240x240"
         title = f"[Slot{slot_id}] {label or 'CHECK'}"
         # nếu ini có guide -> ưu tiên dùng
         if guide:
@@ -2571,10 +2714,11 @@ class AppGUI:
                     continue
                 cmd0 = (fx.slot_command.get(slot_id, "") or "").strip()
                 guide = (fx.slot_guide.get(slot_id, "") or "").strip()
+                img = (fx.slot_image.get(slot_id, "") or "").strip()
+                
                 # lấy station hiện tại
                 selected, stations, station_map = load_station_cfg(self.cfg_path)
                 st = station_map.get(selected or "")
-
                 expect_s = ""
                 reject_s = ""
                 if st:
@@ -2594,7 +2738,7 @@ class AppGUI:
                         expect_s = st.cmds.get("expect", "")
                         reject_s = st.cmds.get("reject", "")
                         
-                plan.append(self._guide_make_case(slot_id, lbl, cmd0,guide_text=guide,
+                plan.append(self._guide_make_case(slot_id, lbl, cmd0,guide_text=guide, image_key=img, 
                     expect_regex=expect_s,
                     reject_regex=reject_s,))
 

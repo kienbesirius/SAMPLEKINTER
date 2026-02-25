@@ -34,7 +34,8 @@ class FixtureConfig:
     slot_text: Dict[int, str]
     slot_command: Dict[int, str]
     slot_status: Dict[int, str] 
-    slot_guide: Dict[int, str]   # NEW
+    slot_guide: Dict[int, str]
+    slot_image: Dict[int, str]
 
 def load_fixture_cfg(path: str) -> FixtureConfig:
     # strict=False để không crash nếu config có key trùng (slot8 bị lặp)
@@ -52,6 +53,7 @@ def load_fixture_cfg(path: str) -> FixtureConfig:
     slot_command: Dict[int, str] = {}
     slot_status: Dict[int, str] = {}
     slot_guide: Dict[int, str] = {}
+    slot_image: Dict[int, str] = {}
     for i in range(1, 13):
         slot_text[i] = cfg.get("SLOT_TEST", f"slot{i}", fallback="").strip()
         slot_command[i] = cfg.get("SLOT_COMMAND", f"slot{i}", fallback="").strip()
@@ -59,6 +61,7 @@ def load_fixture_cfg(path: str) -> FixtureConfig:
 
         g = cfg.get("SLOT_GUIDE", f"slot{i}", fallback="").strip()
         slot_guide[i] = g.replace(r"\n", "\n")
+        slot_image[i] = cfg.get("SLOT_IMAGE", f"slot{i}", fallback="").strip()
     # for i in range(1, 13):
     #     slot_text[i] = cfg.get("SLOT_TEST", f"slot{i}", fallback="").strip()
     #     slot_command[i] = cfg.get("SLOT_COMMAND", f"slot{i}", fallback="").strip()
@@ -72,7 +75,8 @@ def load_fixture_cfg(path: str) -> FixtureConfig:
         slot_text=slot_text,
         slot_command=slot_command,
         slot_status=slot_status,
-        slot_guide=slot_guide
+        slot_guide=slot_guide,
+        slot_image=slot_image,
     )
 
 def update_ini_fixture_section(
@@ -193,6 +197,60 @@ def update_ini_slot_guide(
 
     lines = _upsert(lines)
     out_text = newline.join(lines) + newline
+    _atomic_write_text(path, out_text, encoding=encoding)
+
+def update_ini_slot_image(
+    ini_path: Union[str, Path],
+    *,
+    slot_idx: int,
+    image_key: str,
+    section_name: str = "SLOT_IMAGE",
+    slots: int = 12,
+    encoding: str = "utf-8",
+) -> None:
+    path = Path(ini_path)
+    if path.exists():
+        raw = path.read_bytes()
+        newline = _detect_newline(raw)
+        lines = raw.decode(encoding, errors="replace").splitlines()
+    else:
+        newline = "\n"
+        lines = []
+
+    v = (image_key or "").strip()
+
+    start, end = _find_section_bounds(lines, section_name)
+    if start is None:
+        if lines and lines[-1].strip() != "":
+            lines.append("")
+        lines.append(f"[{section_name}]")
+        start = len(lines)
+        end = len(lines)
+    if end is None:
+        end = len(lines)
+
+    found = False
+    new_sec: list[str] = []
+    for ln in lines[start:end]:
+        m = _SLOT_RE.match(ln)
+        if m:
+            indent, key, num_s, eq, _old, trail = m.groups()
+            try:
+                num = int(num_s)
+            except ValueError:
+                new_sec.append(ln); continue
+            if num == int(slot_idx):
+                new_sec.append(f"{indent}{key}{num}{eq}{v}{trail}")
+                found = True
+                continue
+        new_sec.append(ln)
+
+    if not found:
+        if new_sec and new_sec[-1].strip() != "":
+            new_sec.append("")
+        new_sec.append(f"slot{int(slot_idx)}={v}")
+
+    out_text = newline.join(lines[:start] + new_sec + lines[end:]) + newline
     _atomic_write_text(path, out_text, encoding=encoding)
 
 def choose_slot_font(label: str) -> Tuple[str, int, str]:
@@ -730,6 +788,7 @@ class Station:
     slot_test: Dict[int, str]            # slot_idx -> label (trước dấu phẩy)
     slot_command: Dict[int, str]         # slot_idx -> cmd   (sau dấu phẩy)
     slot_guide: Dict[int, str]
+    slot_image: Dict[int, str]  
 
 def _parse_station_slot_pair(raw: str) -> tuple[str, str]:
     """
@@ -745,21 +804,38 @@ def _parse_station_slot_pair(raw: str) -> tuple[str, str]:
     left, right = s.split(",", 1)
     return left.strip(), right.strip()
 
-def _parse_station_slot_line(v: str) -> tuple[str, str, str]:
+# def _parse_station_slot_line(v: str) -> tuple[str, str, str]:
+#     v = (v or "").strip()
+#     if not v:
+#         return "", "", ""
+#     row = next(csv.reader(StringIO(v), skipinitialspace=True))
+#     # row: [test, cmd, guide]  (guide có thể thiếu)
+#     test = row[0].strip() if len(row) > 0 else ""
+#     cmd  = row[1].strip() if len(row) > 1 else ""
+#     guide = row[2] if len(row) > 2 else ""
+#     guide = guide.strip()
+#     # bỏ quote ngoài nếu còn
+#     if len(guide) >= 2 and guide[0] == '"' and guide[-1] == '"':
+#         guide = guide[1:-1]
+#     guide = guide.replace(r"\n", "\n")
+#     return test, cmd, guide
+
+def _parse_station_slot_line(v: str) -> tuple[str, str, str, str]:
     v = (v or "").strip()
     if not v:
-        return "", "", ""
+        return "", "", "", ""
     row = next(csv.reader(StringIO(v), skipinitialspace=True))
-    # row: [test, cmd, guide]  (guide có thể thiếu)
-    test = row[0].strip() if len(row) > 0 else ""
-    cmd  = row[1].strip() if len(row) > 1 else ""
-    guide = row[2] if len(row) > 2 else ""
-    guide = guide.strip()
-    # bỏ quote ngoài nếu còn
+
+    test  = row[0].strip() if len(row) > 0 else ""
+    cmd   = row[1].strip() if len(row) > 1 else ""
+    guide = row[2].strip() if len(row) > 2 else ""
+    img   = row[3].strip() if len(row) > 3 else ""
+
+    # bỏ quote ngoài nếu còn (csv thường đã xử lý, nhưng giữ để chắc)
     if len(guide) >= 2 and guide[0] == '"' and guide[-1] == '"':
         guide = guide[1:-1]
     guide = guide.replace(r"\n", "\n")
-    return test, cmd, guide
+    return test, cmd, guide, img
 
 def load_station_cfg(
     path: Union[str, Path],
@@ -809,7 +885,8 @@ def load_station_cfg(
         cmds = {k: "" for k in cmd_keys}
         slot_test: Dict[int, str] = {i: "" for i in range(1, slots + 1)}
         slot_command: Dict[int, str] = {i: "" for i in range(1, slots + 1)}
-        slot_guide: Dict[int, str] = {i: "" for i in range(1, slots + 1)}  # NEW
+        slot_guide: Dict[int, str] = {i: "" for i in range(1, slots + 1)}
+        slot_image: Dict[int, str] = {i: "" for i in range(1, slots + 1)}
 
         if cfg.has_section(sec):
             # --- cmds (như cũ) ---
@@ -819,17 +896,19 @@ def load_station_cfg(
             # --- slots (NEW) ---
             for i in range(1, slots + 1):
                 raw = cfg.get(sec, f"slot{i}", fallback="").strip()
-                st, sc, gd = _parse_station_slot_line(raw)  # NEW
+                st, sc, gd, im = _parse_station_slot_line(raw)  # NEW
                 slot_test[i] = st
                 slot_command[i] = sc
                 slot_guide[i] = gd
+                slot_image[i] = im
 
         st_obj = Station(
             name=name,
             cmds=cmds,
             slot_test=slot_test,
             slot_command=slot_command,
-            slot_guide=slot_guide,   # NEW
+            slot_guide=slot_guide,
+            slot_image=slot_image,
         )
         stations_list.append(st_obj)
         station_map[name] = st_obj

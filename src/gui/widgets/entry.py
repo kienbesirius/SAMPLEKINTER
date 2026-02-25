@@ -195,6 +195,15 @@ class CanvasEntry:
         self.entry.bind("<FocusOut>", self._on_focus_out)
         self.entry.bind("<Return>", self._on_key_enter)
 
+        # Enter thường + Enter numpad, dùng add="+" để tránh bị override
+        # try:
+        #     self.entry.bind("<Return>", self._on_key_enter, add="+")
+        #     self.entry.bind("<KP_Enter>", self._on_key_enter, add="+")
+        # except TypeError:
+        #     # fallback cho Tk rất cũ (không hỗ trợ add kw)
+        #     self.entry.bind("<Return>", self._on_key_enter)
+        #     self.entry.bind("<KP_Enter>", self._on_key_enter)
+            
         if self.ph_label is not None:
             self.ph_label.bind("<Button-1>", self._on_placeholder_click)
 

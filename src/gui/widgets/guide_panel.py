@@ -142,43 +142,110 @@ class GuidePanel:
         self.cv_img.bind("<Configure>", self._on_img_resize, add="+")
         self.cv_btn.bind("<Configure>", self._on_btn_resize, add="+")
 
-            # --- enter to confirm ---
+        try:
+            self.frame.configure(takefocus=1)
+            self.lb_title.configure(takefocus=0)   # label không cần focus
+            self.cv_img.configure(takefocus=1)
+            self.cv_btn.configure(takefocus=1)
+        except Exception:
+            pass
+        # --- enter to confirm ---
         self._visible = True
         self._enter_enabled = True
-        self.root.bind("<Return>", self._on_key_enter, add="+")
-        self.root.bind("<KP_Enter>", self._on_key_enter, add="+")
+        # self.root.bind("<Return>", self._on_key_enter, add="+")
+        # self.root.bind("<KP_Enter>", self._on_key_enter, add="+")
+
+        # bind vào toplevel thật sự (đúng window đang chứa guide)
+        self._top = self.frame.winfo_toplevel()
+
+        # lưu bind id để unbind được (tránh kẹt callback sau khi hide/destroy)
+        self._bindid_return = self._top.bind("<Return>", self._on_key_enter, add="+")
+        self._bindid_kp = self._top.bind("<KP_Enter>", self._on_key_enter, add="+")
+
+    def _unbind_enter(self):
+        try:
+            if getattr(self, "_bindid_return", None):
+                self._top.unbind("<Return>", self._bindid_return)
+                self._bindid_return = None
+            if getattr(self, "_bindid_kp", None):
+                self._top.unbind("<KP_Enter>", self._bindid_kp)
+                self._bindid_kp = None
+        except Exception:
+            pass
+    # def _on_key_enter(self, event=None):
+    #     # chỉ xử lý khi guide đang hiện
+    #     if not getattr(self, "_visible", True) or not getattr(self, "_enter_enabled", True):
+    #         return None
+    #     if not self.steps:
+    #         return None
+
+    #     # nếu đang focus vào entry/text thì để nó tự xử lý Enter (không hijack)
+    #     w = None
+    #     try:
+    #         w = self.root.focus_get()
+    #     except Exception:
+    #         w = None
+
+    #     if w is not None:
+    #         try:
+    #             cls = w.winfo_class()
+    #         except Exception:
+    #             cls = ""
+    #         if cls in ("Entry", "TEntry", "Text", "TCombobox", "Spinbox", "TSpinbox"):
+    #             return None
+
+    #     # nếu button đang disabled (busy) thì bỏ qua
+    #     if getattr(self._btn, "_disabled", False):
+    #         return "break"
+
+    #     # trigger giống click
+    #     self._on_confirm_click()
+    #     return "break"
+
+    def _is_descendant(self, w: tk.Misc, ancestor: tk.Misc) -> bool:
+        """True nếu w nằm bên trong ancestor (đi ngược master chain)."""
+        try:
+            while w is not None:
+                if w == ancestor:
+                    return True
+                w = w.master
+        except Exception:
+            pass
+        return False
 
     def _on_key_enter(self, event=None):
-        # chỉ xử lý khi guide đang hiện
         if not getattr(self, "_visible", True) or not getattr(self, "_enter_enabled", True):
             return None
         if not self.steps:
             return None
 
-        # nếu đang focus vào entry/text thì để nó tự xử lý Enter (không hijack)
+        # focus widget: dùng event.widget (đúng cửa sổ đang nhận key)
         w = None
         try:
-            w = self.root.focus_get()
+            if event is not None and getattr(event, "widget", None) is not None:
+                w = event.widget.focus_get()
+            else:
+                w = self.frame.focus_get()
         except Exception:
             w = None
 
-        if w is not None:
-            try:
-                cls = w.winfo_class()
-            except Exception:
-                cls = ""
-            if cls in ("Entry", "TEntry", "Text", "TCombobox", "Spinbox", "TSpinbox"):
-                return None
+        # ✅ chỉ xử lý Enter nếu focus đang nằm trong GuidePanel
+        if w is None or not self._is_descendant(w, self.frame):
+            return None
 
-        # nếu button đang disabled (busy) thì bỏ qua
+        # nếu đang focus vào entry/text trong guide thì không hijack
+        try:
+            cls = w.winfo_class()
+        except Exception:
+            cls = ""
+        if cls in ("Entry", "TEntry", "Text", "TCombobox", "Spinbox", "TSpinbox"):
+            return None
+
         if getattr(self._btn, "_disabled", False):
             return "break"
 
-        # trigger giống click
         self._on_confirm_click()
         return "break"
-
-
     # ----------------------------
     # Public APIs
     # ----------------------------
@@ -191,23 +258,55 @@ class GuidePanel:
         self.show()
         self._apply_step()
 
+    def focus_default(self):
+        # focus vào canvas button để Enter luôn thuộc GuidePanel
+        try:
+            self.cv_btn.focus_set()
+            return
+        except Exception:
+            pass
+        try:
+            self.frame.focus_set()
+        except Exception:
+            pass
+        
+    def _bind_enter(self):
+        try:
+            self._top = self.frame.winfo_toplevel()
+            if not getattr(self, "_bindid_return", None):
+                self._bindid_return = self._top.bind("<Return>", self._on_key_enter, add="+")
+            if not getattr(self, "_bindid_kp", None):
+                self._bindid_kp = self._top.bind("<KP_Enter>", self._on_key_enter, add="+")
+        except Exception:
+            pass
+        
     def show(self) -> None:
         self._visible = True
+        self._bind_enter()
         if hasattr(self.center_panel, "show"):
             try:
                 self.center_panel.show()
             except Exception:
                 pass
         self.frame.lift()
+        self.focus_default()
+
+    # def hide(self) -> None:
+    #     self._visible = False
+    #     if hasattr(self.center_panel, "hide"):
+    #         try:
+    #             self.center_panel.hide()
+    #         except Exception:
+    #             pass
 
     def hide(self) -> None:
         self._visible = False
+        self._unbind_enter()
         if hasattr(self.center_panel, "hide"):
             try:
                 self.center_panel.hide()
             except Exception:
                 pass
-
 
     def goto(self, index: int) -> None:
         if not self.steps:
