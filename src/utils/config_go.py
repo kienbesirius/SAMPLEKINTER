@@ -644,20 +644,30 @@ _STATION_CMD_KEYS: Tuple[str, ...] = (
     "raster_reject",
 )
 
+# ====== config_go.py ======
+# (1) update Station dataclass: thêm 2 dict slot_test/slot_command
+
 @dataclass(frozen=True)
 class Station:
     name: str
-    cmds: Dict[str, str]  # keys cố định theo _STATION_CMD_KEYS
+    cmds: Dict[str, str]                 # keys cố định theo _STATION_CMD_KEYS
+    slot_test: Dict[int, str]            # slot_idx -> label (trước dấu phẩy)
+    slot_command: Dict[int, str]         # slot_idx -> cmd   (sau dấu phẩy)
 
 
-def _split_csv(s: str) -> List[str]:
-    # "AFT, ADL1,ADL2" -> ["AFT","ADL1","ADL2"]
-    out: List[str] = []
-    for p in (s or "").split(","):
-        p = p.strip()
-        if p:
-            out.append(p)
-    return out
+def _parse_station_slot_pair(raw: str) -> tuple[str, str]:
+    """
+    Parse: "SENSOR1, raster_state" -> ("SENSOR1", "raster_state")
+    - Nếu không có dấu phẩy: coi như chỉ có slot_test, slot_command=""
+    - Strip spaces an toàn
+    """
+    s = (raw or "").strip()
+    if not s:
+        return "", ""
+    if "," not in s:
+        return s, ""
+    left, right = s.split(",", 1)
+    return left.strip(), right.strip()
 
 
 def load_station_cfg(
@@ -667,13 +677,17 @@ def load_station_cfg(
     station_root_section: str = "STATION",
     station_prefix: str = "STATION_",
     cmd_keys: Tuple[str, ...] = _STATION_CMD_KEYS,
+    slots: int = 12,   # <-- NEW
 ) -> Tuple[Optional[str], List[Station], Dict[str, Station]]:
     """
     Return: (selected_station_name, stations_list, station_map)
 
     - Ưu tiên đọc thứ tự từ [STATION].stations (csv)
     - Fallback: scan all sections STATION_<NAME>
-    - Mỗi station có cmds dict với keys cố định trong cmd_keys
+    - Mỗi station có:
+        + cmds dict (như cũ)
+        + slot_test / slot_command dict theo slot1..slot{slots}
+          Format trong ini: slot1 = <slot_test>, <slot_command>
     """
     cfg = configparser.ConfigParser(strict=False)
     cfg.read(str(path), encoding=encoding)
@@ -692,39 +706,64 @@ def load_station_cfg(
                 name = sec[len(station_prefix):].strip()
                 if name:
                     station_names.append(name)
-
         station_names.sort(key=lambda x: x.upper())
 
-    stations: List[Station] = []
+    stations_list: List[Station] = []
     station_map: Dict[str, Station] = {}
 
     for name in station_names:
         sec = f"{station_prefix}{name}"
-        if not cfg.has_section(sec):
-            # nếu config khai báo stations=... nhưng thiếu section -> vẫn tạo object rỗng để bạn detect
-            cmds = {k: "" for k in cmd_keys}
-            st = Station(name=name, cmds=cmds)
-            stations.append(st)
-            station_map[name] = st
-            continue
 
-        cmds: Dict[str, str] = {}
-        for k in cmd_keys:
-            cmds[k] = cfg.get(sec, k, fallback="").strip()
+        # defaults (kể cả khi thiếu section)
+        cmds = {k: "" for k in cmd_keys}
+        slot_test: Dict[int, str] = {i: "" for i in range(1, slots + 1)}
+        slot_command: Dict[int, str] = {i: "" for i in range(1, slots + 1)}
 
-        st = Station(name=name, cmds=cmds)
-        stations.append(st)
-        station_map[name] = st
+        if cfg.has_section(sec):
+            # --- cmds (như cũ) ---
+            for k in cmd_keys:
+                cmds[k] = cfg.get(sec, k, fallback="").strip()
 
-    return selected, stations, station_map
+            # --- slots (NEW) ---
+            for i in range(1, slots + 1):
+                raw = cfg.get(sec, f"slot{i}", fallback="").strip()
+                st, sc = _parse_station_slot_pair(raw)
+                slot_test[i] = st
+                slot_command[i] = sc
 
+        st_obj = Station(
+            name=name,
+            cmds=cmds,
+            slot_test=slot_test,
+            slot_command=slot_command,
+        )
+        stations_list.append(st_obj)
+        station_map[name] = st_obj
+
+    # print(stations_list)
+    # print(station_map)
+    return selected, stations_list, station_map
+
+def _split_csv(s: str) -> List[str]:
+    # "AFT, ADL1,ADL2" -> ["AFT","ADL1","ADL2"]
+    out: List[str] = []
+    for p in (s or "").split(","):
+        p = p.strip()
+        if p:
+            out.append(p)
+    return out
 
 def get_selected_station(
     path: Union[str, Path],
     *,
     encoding: str = "utf-8",
 ) -> Optional[Station]:
-    selected, _stations, mp = load_station_cfg(path, encoding=encoding)
+    selected, stations_list, station_map, mp = load_station_cfg(path, encoding=encoding)
+
     if not selected:
         return None
+    
+    # print(stations_list)
+    print(station_map)
     return mp.get(selected)
+

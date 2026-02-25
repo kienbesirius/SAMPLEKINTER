@@ -1448,7 +1448,7 @@ class AppGUI:
             return
 
         cfg_path = Path(app_dir()) / "config.ini"
-        selected_name, stations, _mp = load_station_cfg(cfg_path)
+        selected_name, stations, station_map = load_station_cfg(cfg_path)
 
         # nếu config chưa có selected -> default = station đầu tiên (UI sẽ dirty=False)
         base_selected = selected_name or (stations[0].name if stations else "")
@@ -1662,7 +1662,12 @@ class AppGUI:
 
         def _confirm():
             name = cur["name"]
+            
             if name:
+                st = station_map.get(name)
+                if not st:
+                    _cancel()
+                    return
                 # update label Station ngay
                 try:
                     for w in self._iter_windows():
@@ -1678,6 +1683,52 @@ class AppGUI:
                     self._ini_set_selected_station(name)
                 except Exception:
                     pass
+
+                try:
+                    self._update_ini_selected_station(cfg_path, name)
+                    # 2) write slot_test + slot_cmd into ini
+                    for i in range(1, 13):
+                        update_ini_manual_slot_info(
+                            cfg_path,
+                            slot_idx=i,
+                            slot_test=st.slot_test.get(i, ""),
+                            slot_cmd=st.slot_command.get(i, ""),
+                        )
+                except Exception:
+                    pass
+
+                # 3) reset SLOT_STATUS to idle/item according to SLOT_TEST
+                try:
+                    reset_slot_status_section_to_idle(cfg_path)
+                except Exception:
+                    pass
+                
+                # 4) reload fixture cfg & refresh slot widgets text/font/status
+                self.fx_cfg = load_fixture_cfg(cfg_path)
+
+                # update each window slots UI
+                for w in self._iter_windows():
+                    wws = self._get_widgets(w)
+                    if not wws:
+                        continue
+                    for i in range(1, 13):
+                        slotw = wws.get(f"slot{i}")
+                        if not slotw:
+                            continue
+                        text = self.fx_cfg.slot_text.get(i, "")
+                        font = choose_slot_font(text)
+                        try:
+                            slotw.configure(text=text, font=font)
+                        except Exception:
+                            try:
+                                slotw.configure(text=text)
+                            except Exception:
+                                pass
+                
+                # 5) rebuild guide preview steps based on new config.ini
+                self._guide_reset()  # sẽ build lại preview + goto step 0
+
+                self._guide_rebuild_preview_all()
 
             _cancel()
 
@@ -2230,6 +2281,98 @@ class AppGUI:
     # ----------------------------
     # GUIDE FLOW (theo slot + retry)
     # ----------------------------
+
+    # Dùng khi chọn station
+    def _update_ini_selected_station(self, ini_path: Path, station_name: str) -> None:
+        import re
+
+        raw = ini_path.read_bytes() if ini_path.exists() else b""
+        newline = "\r\n" if b"\r\n" in raw else "\n"
+        lines = (raw.decode("utf-8", errors="replace").splitlines() if raw else [])
+
+        section_re = re.compile(r"^\s*\[([^\]]+)\]\s*$")
+        kv_re = re.compile(r"^(\s*)(selected_station)(\s*=\s*)(.*?)(\s*)$", re.IGNORECASE)
+
+        # tìm bounds [STATION]
+        start = end = None
+        for i, ln in enumerate(lines):
+            m = section_re.match(ln)
+            if not m:
+                continue
+            name = m.group(1).strip()
+            if start is None and name.upper() == "STATION":
+                start = i + 1
+                continue
+            if start is not None:
+                end = i
+                break
+        if start is None:
+            if lines and lines[-1].strip() != "":
+                lines.append("")
+            lines.append("[STATION]")
+            start = len(lines)
+            end = len(lines)
+        if end is None:
+            end = len(lines)
+
+        found = False
+        new_sec = []
+        for ln in lines[start:end]:
+            m = kv_re.match(ln)
+            if m:
+                indent, key, eq, _old, trail = m.groups()
+                new_sec.append(f"{indent}{key}{eq}{station_name}{trail}")
+                found = True
+            else:
+                new_sec.append(ln)
+
+        if not found:
+            if new_sec and new_sec[-1].strip() != "":
+                new_sec.append("")
+            new_sec.append(f"selected_station={station_name}")
+
+        out_lines = lines[:start] + new_sec + lines[end:]
+        ini_path.write_text(newline.join(out_lines) + newline, encoding="utf-8")
+        
+    def _guide_set_confirm_enabled_all(self, enabled: bool) -> None:
+        """
+        Cố gắng disable/hide confirm button của GuidePanel ở tất cả window.
+        Không biết nội bộ GuidePanel expose gì, nên thử nhiều kiểu.
+        """
+        for gp in self._iter_guide_panels():
+            try:
+                # ưu tiên method nếu GuidePanel có
+                if hasattr(gp, "set_confirm_enabled"):
+                    gp.set_confirm_enabled(enabled)   # type: ignore[attr-defined]
+                    continue
+                if hasattr(gp, "set_confirm_visible"):
+                    gp.set_confirm_visible(enabled)   # type: ignore[attr-defined]
+                    continue
+
+                # fallback: nếu có button object bên trong
+                for name in ("confirm_btn", "btn_confirm", "button_confirm"):
+                    btn = getattr(gp, name, None)
+                    if btn is None:
+                        continue
+                    # CanvasButton thường có set_disabled(...)
+                    if hasattr(btn, "set_disabled"):
+                        btn.set_disabled(not enabled)  # type: ignore[attr-defined]
+                    # hoặc configure(state=...)
+                    elif hasattr(btn, "configure"):
+                        btn.configure(state=("normal" if enabled else "disabled"))
+                    break
+            except Exception:
+                pass
+
+
+    def _guide_rebuild_preview_all(self) -> None:
+        """
+        Rebuild preview steps từ config.ini hiện tại và apply cho tất cả GuidePanel.
+        """
+        steps = self._build_guide_preview_steps()
+        self._guide_apply_steps_all_windows(steps, start_index=0)
+        self._guide_goto_all(0)
+
     def _init_guide_flow(self):
         # trạng thái luồng guide (điều khiển theo slot, retry tối đa)
         self._guide_busy: bool = False
