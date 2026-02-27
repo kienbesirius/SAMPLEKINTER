@@ -1,6 +1,7 @@
 import os, sys, json, socket, subprocess, platform, shutil, tempfile
 from pathlib import Path
 from typing import Sequence, Union, Optional
+import time
 
 from src.utils.resource_path import app_dir, bundled_dir  # :contentReference[oaicite:1]{index=1}
 
@@ -246,10 +247,15 @@ def ensure_watchdog_running(
         cmd = [*base, "--port", str(port), "--log-dir", str(log_dir)]
         _spawn_detached(cmd)
 
-        # 3) quick retry connect
+        # # 3) quick retry connect
         for _ in range(10):
             if _wd_send({"cmd": "ping"}):
                 break
+        # for _ in range(40):
+        #     if _wd_send({"cmd": "ping"}):
+        #         break
+        #     time.sleep(0.1)
+        
 
     # 4) register current PID for monitoring
     # log_callback("[watchdog] registering current process...")

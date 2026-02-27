@@ -1,3 +1,4 @@
+from __future__ import annotations
 import hashlib
 import os
 import re
@@ -28,10 +29,15 @@ from src.gui.widgets.canvas_log_widget import bind_canvas_log_widget
 from src.utils.enable_startup import enable_startup, disable_startup, is_startup_enabled
 from src.gui.widgets.rect_panel import bind_center_rect_panel, CenterRectStyle
 from src.gui.fixture.fill_multiple_monitor import fullscreen_on_monitor, get_monitors, monitor_from_point
-from src.gui.fixture.get_fixture_port import get_fixture_port, parse_fixture_port_text
+from src.gui.fixture.get_fixture_port import get_fixture_port, parse_fixture_port_text, _LE_TO_ENDING
 from src.gui.fixture.get_serial_list import get_serial_ports
 from src.gui.fixture.listen_port import ListenPort
 from src.utils.config_go import load_fixture_cfg, choose_slot_font, reset_slot_status_section_to_idle, update_ini_slot_status, load_slot_status_from_ini, SlotStatus, _ALLOWED_STATUS, update_ini_fixture_section, update_ini_manual_slot_info, update_ini_slot_guide, update_ini_slot_image
+import concurrent.futures as cf
+from src.utils.config_go import (
+    load_fixture_cfg, choose_slot_font, load_slot_status_from_ini,
+    get_test_plan, apply_test_plan_to_config_ini,
+)
 from src.gui.widgets.dialog import ModalOverlay
 import tkinter.font as tkfont
 from src.watchdog.watchdog_gui import wd_register, wd_heartbeat, wd_complete
@@ -50,107 +56,326 @@ class GuideCase:
     reject: Optional[Pattern[str]] = None
 
 
-# CORE-1: Getting fixture port
-def obtaining_fixture_com(emit=print, cancel_event: threading.Event=None, progress_cb=None):
+# # CORE-1: Getting fixture port
+# def obtaining_fixture_com(emit=print, cancel_event: threading.Event=None, progress_cb=None):
+#     """
+#     Lấy cổng COM của thiết bị fixture.
+#     Trả về chuỗi tên cổng (vd: "COM3") hoặc None nếu không tìm thấy.
+#     progress_cb: Callable[[str], None] - callback để báo tiến trình (nếu cần)
+#     cancel_event: threading.Event - sự kiện để hủy bỏ quá trình tìm kiếm
+#     """
+#     cfg_path = Path(app_dir()) / "config.ini"
+#     fx = load_fixture_cfg(cfg_path)
+
+#     try:
+#         def _progress(msg: str, *, port: str = "", baudrate: int = 0, ending_line: str = ""):
+#             if progress_cb:
+#                 progress_cb({
+#                     "message": msg,
+#                     "port": port,
+#                     "baudrate": baudrate,
+#                     "ending_line": ending_line,
+#                 })
+        
+#         # 1) ưu tiên cache trong config
+#         if fx.port and fx.port.upper() != "COMX":
+#             _progress(f"Checking cached fixture port: {fx.port} ...",
+#                       port=fx.port, baudrate=fx.baudrate, ending_line=fx.ending_line)
+
+#             try:
+#                 r = get_fixture_port(
+#                     fx.port,
+#                     baudrates=[fx.baudrate],
+#                 )
+#                 r = parse_fixture_port_text(r)
+#                 if r:
+#                     emit("Found fixture from config:", fx.port)
+#                     # (optional) refresh cache theo kết quả thực tế nếu bạn đã mở rộng ProbeResult
+#                     try:
+#                         update_ini_fixture_section(
+#                             cfg_path,
+#                             port=r.port,
+#                             baudrate=getattr(r.baudrate, "baudrate", fx.baudrate),
+#                             ending_line=getattr(r.line_ending, "ending_line", fx.ending_line),
+#                             timeout=fx.timeout,
+#                         )
+#                     except Exception:
+#                         pass
+
+#                     _progress("Found fixture (cached).",
+#                             port=r.port,
+#                             baudrate=getattr(r, "baudrate", fx.baudrate),
+#                             ending_line=getattr(r, "ending_line", fx.ending_line))
+#                     return r.port
+#             except Exception as e:
+#                 emit(f"Error checking cached port {fx.port}: {e}")
+#                 r = None
+                
+#                 _progress(f"Cached port not fixture, fallback scanning...", port=fx.port,
+#                         baudrate=fx.baudrate, ending_line=fx.ending_line)
+                
+
+#         ports = get_serial_ports()
+#         for port in ports:
+#             if cancel_event and cancel_event.is_set():
+#                 emit("Obtaining COM cancelled.")
+#                 return "COMX"
+#             if progress_cb:
+#                 progress_cb({"message": f"Checking {port}..."})
+#             found = get_fixture_port(port)
+            
+#             if found:
+#                 parsed = parse_fixture_port_text(found)
+#                 emit("Found fixture on COM:", port)
+#                 if progress_cb:
+#                     progress_cb({
+#                         "message": f"Found: {found}...",
+#                         "port": parsed.port,
+#                         "baudrate": parsed.baudrate,
+#                         "ending_line": parsed.line_ending    
+#                     })
+
+#                 # 3) ghi cache vào config để lần sau nhanh
+#                 update_ini_fixture_section(
+#                     cfg_path,
+#                     port=port,
+#                     baudrate=getattr(r, "baudrate", parsed.baudrate),
+#                     ending_line=getattr(r, "ending_line", parsed.line_ending),
+#                     timeout=fx.timeout,
+#                 )
+
+#                 _progress("Found fixture (scanned).",
+#                           port=port,
+#                           baudrate=getattr(r, "baudrate", parsed.baudrate),
+#                           ending_line=getattr(r, "ending_line", parsed.line_ending))
+#                 return port
+#             time.sleep(0.1)  # giả lập delay kiểm tra
+
+#         emit("No fixture COM found.")
+#         return "COMX"
+#     except Exception as e:
+#         emit(f"Found exception on obtaining COM ---")
+#         emit(str(e))
+#         return "COMX"
+
+def obtaining_fixture_com(
+    emit=print,
+    cancel_event: threading.Event = None,
+    progress_cb=None,
+    *,
+    max_workers: int = 4,
+    retry_rounds: int = 20,
+    retry_delay_s: float = 1.5,
+    do_slow_fallback_last_round: bool = True,
+):
     """
-    Lấy cổng COM của thiết bị fixture.
-    Trả về chuỗi tên cổng (vd: "COM3") hoặc None nếu không tìm thấy.
-    progress_cb: Callable[[str], None] - callback để báo tiến trình (nếu cần)
-    cancel_event: threading.Event - sự kiện để hủy bỏ quá trình tìm kiếm
+    Return: "COMx" hoặc "COMX" nếu không tìm thấy
+    - scan song song max_workers port
+    - found -> return ngay (không chờ tasks khác)
+    - auto retry nếu fail (phòng COM bị chiếm dụng tạm thời)
     """
     cfg_path = Path(app_dir()) / "config.ini"
     fx = load_fixture_cfg(cfg_path)
 
-    try:
-        def _progress(msg: str, *, port: str = "", baudrate: int = 0, ending_line: str = ""):
-            if progress_cb:
-                progress_cb({
-                    "message": msg,
-                    "port": port,
-                    "baudrate": baudrate,
-                    "ending_line": ending_line,
-                })
-        
-        # 1) ưu tiên cache trong config
-        if fx.port and fx.port.upper() != "COMX":
-            _progress(f"Checking cached fixture port: {fx.port} ...",
-                      port=fx.port, baudrate=fx.baudrate, ending_line=fx.ending_line)
+    stop_evt = threading.Event()  # stop nội bộ khi found (cooperative)
 
+    def is_stopped() -> bool:
+        return stop_evt.is_set() or (cancel_event is not None and cancel_event.is_set())
+
+    def _progress(msg: str, *, port: str = "", baudrate: int = 0, ending_line: str = ""):
+        if progress_cb:
+            progress_cb({
+                "message": msg,
+                "port": port,
+                "baudrate": baudrate,
+                "ending_line": ending_line,
+            })
+
+    # FAST params (tối ưu thời gian)
+    fx_timeout = float(getattr(fx, "timeout", 0.5) or 0.5)
+    fast_wait = min(0.35, max(0.15, fx_timeout))  # không quá nhỏ để tránh false negative
+    fast_probe_cmds = ["?", "help", "HELP", "SHOW_COMMAND"]
+    fast_kwargs = dict(
+        baudrates=[fx.baudrate],
+        per_cmd_wait_s=fast_wait,
+        probe_cmds=fast_probe_cmds,
+    )
+
+    def _write_cache(parsed):
+        # update_ini_fixture_section cần token "CRLF/LF/CR/NONE"
+        ending_token = _LE_TO_ENDING.get(parsed.line_ending, "CRLF")
+        try:
+            update_ini_fixture_section(
+                cfg_path,
+                port=parsed.port,
+                baudrate=parsed.baudrate,
+                ending_line=ending_token,
+                timeout=fx.timeout,
+            )
+        except Exception:
+            pass
+
+    def _try_cached() -> str | None:
+        if not fx.port or fx.port.upper() == "COMX":
+            return None
+
+        _progress(
+            f"Checking cached fixture port: {fx.port} ...",
+            port=fx.port, baudrate=fx.baudrate, ending_line=fx.ending_line
+        )
+
+        try:
+            found_txt = get_fixture_port(fx.port, **fast_kwargs)
+            if not found_txt:
+                return None
+
+            parsed = parse_fixture_port_text(found_txt)
+            emit("Found fixture from config:", parsed.port)
+            _write_cache(parsed)
+
+            _progress("Found fixture (cached).", port=parsed.port, baudrate=parsed.baudrate, ending_line=parsed.line_ending)
+            return parsed.port
+
+        except Exception as e:
+            emit(f"Error checking cached port {fx.port}: {e}")
+            return None
+
+    def _scan_ports_parallel(ports: list[str], *, kwargs: dict) -> str | None:
+        if not ports:
+            return None
+
+        max_w = min(max_workers, len(ports))
+        executor = cf.ThreadPoolExecutor(max_workers=max_w)
+        futures = {}
+        found_port = None
+
+        def worker(port: str):
+            if is_stopped():
+                return (port, None)
+            _progress(f"Checking {port}...", port=port, baudrate=fx.baudrate, ending_line=fx.ending_line)
             try:
-                r = get_fixture_port(
-                    fx.port,
-                    baudrates=[fx.baudrate],
-                )
-                r = parse_fixture_port_text(r)
-                if r:
-                    emit("Found fixture from config:", fx.port)
-                    # (optional) refresh cache theo kết quả thực tế nếu bạn đã mở rộng ProbeResult
-                    try:
-                        update_ini_fixture_section(
-                            cfg_path,
-                            port=r.port,
-                            baudrate=getattr(r.baudrate, "baudrate", fx.baudrate),
-                            ending_line=getattr(r.line_ending, "ending_line", fx.ending_line),
-                            timeout=fx.timeout,
-                        )
-                    except Exception:
-                        pass
-
-                    _progress("Found fixture (cached).",
-                            port=r.port,
-                            baudrate=getattr(r, "baudrate", fx.baudrate),
-                            ending_line=getattr(r, "ending_line", fx.ending_line))
-                    return r.port
+                txt = get_fixture_port(port, **kwargs)
+                return (port, txt)
             except Exception as e:
-                emit(f"Error checking cached port {fx.port}: {e}")
-                r = None
-                
-                _progress(f"Cached port not fixture, fallback scanning...", port=fx.port,
-                        baudrate=fx.baudrate, ending_line=fx.ending_line)
-                
+                emit(f"[scan] {port} error: {e}")
+                return (port, None)
 
-        ports = get_serial_ports()
-        for port in ports:
+        try:
+            for p in ports:
+                futures[executor.submit(worker, p)] = p
+
+            for fut in cf.as_completed(futures):
+                if is_stopped():
+                    break
+
+                port = futures[fut]
+                try:
+                    _p, found_txt = fut.result()
+                except Exception as e:
+                    emit(f"[scan] future error on {port}: {e}")
+                    continue
+
+                if not found_txt:
+                    continue
+
+                # FOUND
+                stop_evt.set()
+                try:
+                    parsed = parse_fixture_port_text(found_txt)
+                except Exception as e:
+                    emit(f"parse_fixture_port_text failed: {e}")
+                    found_port = port
+                    break
+
+                emit("Found fixture on COM:", parsed.port)
+                if progress_cb:
+                    progress_cb({
+                        "message": f"Found: {found_txt}",
+                        "port": parsed.port,
+                        "baudrate": parsed.baudrate,
+                        "ending_line": parsed.line_ending,
+                    })
+
+                _write_cache(parsed)
+                _progress("Found fixture (scanned).", port=parsed.port, baudrate=parsed.baudrate, ending_line=parsed.line_ending)
+
+                found_port = parsed.port
+
+                # cancel futures chưa chạy
+                for other in futures:
+                    other.cancel()
+
+                # QUAN TRỌNG: shutdown(wait=False) để return ngay, không bị chờ
+                try:
+                    executor.shutdown(wait=False, cancel_futures=True)
+                except TypeError:
+                    executor.shutdown(wait=False)
+                return found_port
+
+            # không tìm thấy -> phải chờ kết thúc sạch để retry không bị “đè task”
+            executor.shutdown(wait=True)
+            return None
+
+        finally:
+            # nếu có exception nào đó mà chưa shutdown
+            # (shutdown nhiều lần cũng không sao)
+            try:
+                if found_port is None:
+                    executor.shutdown(wait=True)
+            except Exception:
+                pass
+
+    # =========================
+    # MAIN FLOW + RETRY
+    # =========================
+    if cancel_event and cancel_event.is_set():
+        emit("Obtaining COM cancelled.")
+        return "COMX"
+
+    for round_idx in range(max(1, int(retry_rounds))):
+        # reset stop flag mỗi vòng
+        stop_evt.clear()
+
+        if round_idx > 0:
+            _progress(f"Retry scanning... ({round_idx+1}/{retry_rounds})")
+            # sleep có kiểm tra cancel
+            t_end = time.monotonic() + float(retry_delay_s)
+            while time.monotonic() < t_end:
+                if cancel_event and cancel_event.is_set():
+                    emit("Obtaining COM cancelled.")
+                    return "COMX"
+                time.sleep(0.05)
+
+        # 1) cached
+        cached = _try_cached()
+        if cached:
+            return cached
+
+        # 2) refresh ports list mỗi vòng (vì có thể COM vừa xuất hiện)
+        ports = list(get_serial_ports() or [])
+        if fx.port and fx.port in ports:
+            ports.remove(fx.port)
+
+        if not ports:
+            emit("No serial ports found.")
+            continue  # vẫn retry vì port có thể xuất hiện sau
+
+        # 3) FAST scan song song
+        found = _scan_ports_parallel(ports, kwargs=fast_kwargs)
+        if found:
+            return found
+
+        # 4) SLOW fallback (chỉ làm ở vòng cuối để khỏi kéo dài retry)
+        if do_slow_fallback_last_round and (round_idx == retry_rounds - 1):
             if cancel_event and cancel_event.is_set():
                 emit("Obtaining COM cancelled.")
                 return "COMX"
-            if progress_cb:
-                progress_cb({"message": f"Checking {port}..."})
-            found = get_fixture_port(port)
-            
+            found = _scan_ports_parallel(ports, kwargs={})  # default get_fixture_port (cover rộng hơn)
             if found:
-                parsed = parse_fixture_port_text(found)
-                emit("Found fixture on COM:", port)
-                if progress_cb:
-                    progress_cb({
-                        "message": f"Found: {found}...",
-                        "port": parsed.port,
-                        "baudrate": parsed.baudrate,
-                        "ending_line": parsed.line_ending    
-                    })
+                return found
 
-                # 3) ghi cache vào config để lần sau nhanh
-                update_ini_fixture_section(
-                    cfg_path,
-                    port=port,
-                    baudrate=getattr(r, "baudrate", parsed.baudrate),
-                    ending_line=getattr(r, "ending_line", parsed.line_ending),
-                    timeout=fx.timeout,
-                )
-
-                _progress("Found fixture (scanned).",
-                          port=port,
-                          baudrate=getattr(r, "baudrate", parsed.baudrate),
-                          ending_line=getattr(r, "ending_line", parsed.line_ending))
-                return port
-            time.sleep(0.1)  # giả lập delay kiểm tra
-
-        emit("No fixture COM found.")
-        return "COMX"
-    except Exception as e:
-        emit(f"Found exception on obtaining COM ---")
-        emit(str(e))
-        return "COMX"
+    emit("No fixture COM found.")
+    return "COMX"
 
 # Keep the window always on top (works on Windows and many Tk backends)
 def topmost_window(root):
@@ -481,6 +706,7 @@ class AppGUI:
             argv = [sys.executable, *sys.argv[1:]]
         else:
             argv = [sys.executable, os.path.abspath(sys.argv[0]), *sys.argv[1:]]
+        self._update_logs_panel(f"argv: {argv}", "green")
         cwd = os.getcwd()
 
         def _after_ensure(_result, _meta):
@@ -794,26 +1020,75 @@ class AppGUI:
 
         return widgets
     
-    def _init_station_text(self, text_station):
-        from pathlib import Path
+    # def _init_station_text(self, text_station):
+    #     from pathlib import Path
         
 
-        cfg_path = Path(app_dir()) / "config.ini"
-        selected_name, stations, mp = load_station_cfg(cfg_path)
+    #     cfg_path = Path(app_dir()) / "config.ini"
+    #     selected_name, stations, mp = load_station_cfg(cfg_path)
 
-        # chọn hợp lệ
-        name = selected_name
-        if not name or (name not in mp):
-            name = stations[0].name if stations else ""
-            # nếu muốn persist luôn default:
-            if name:
-                try:
-                    self._ini_set_selected_station(name)
-                except Exception:
-                    pass
+    #     # chọn hợp lệ
+    #     name = selected_name
+    #     if not name or (name not in mp):
+    #         name = stations[0].name if stations else ""
+    #         # nếu muốn persist luôn default:
+    #         if name:
+    #             try:
+    #                 self._ini_set_selected_station(name)
+    #             except Exception:
+    #                 pass
                 
-        text_station.configure(text=f"Station: {name}" if name else "Station: (none)")
+    #     text_station.configure(text=f"Station: {name}" if name else "Station: (none)")
 
+    def _read_selected_station_raw(self, cfg_path: Path) -> str:
+        import configparser
+        cfg = configparser.ConfigParser(strict=False)
+        cfg.read(str(cfg_path), encoding="utf-8")
+        return cfg.get("STATION", "selected_station", fallback="").strip()
+    
+    def _init_station_text(self, text_station):
+        cfg_path = Path(app_dir()) / "config.ini"
+        name = self._read_selected_station_raw(cfg_path)
+        text_station.configure(text=f"Station: {name}" if name else "Station: (none)")
+    
+    def _reload_from_config_and_render(self):
+        cfg_path = self.cfg_path
+
+        # 1) reload data model từ config.ini
+        self.fx_cfg = load_fixture_cfg(str(cfg_path))
+        self.status_map = load_slot_status_from_ini(cfg_path)
+
+        # 2) update station label (đọc raw từ ini)
+        st_name = self._read_selected_station_raw(cfg_path)
+        for w in self._iter_windows():
+            ws = self._get_widgets(w)
+            t = ws.get("selected_station")
+            if t:
+                t.configure(text=f"Station: {st_name}" if st_name else "Station: (none)")
+
+        # 3) update slot widgets
+        for w in self._iter_windows():
+            ws = self._get_widgets(w)
+            for i in range(1, 13):
+                slotw = ws.get(f"slot{i}")
+                if not slotw:
+                    continue
+                text = (self.fx_cfg.slot_text.get(i, "") or "")
+                font = choose_slot_font(text)
+                try:
+                    slotw.configure(text=text, font=font)
+                except Exception:
+                    try:
+                        slotw.configure(text=text)
+                    except Exception:
+                        pass
+
+        # 4) update status UI theo ini
+        self.reload_slot_status()
+
+        # 5) rebuild guide preview từ config
+        self._guide_reset()
+        
     def _fixture_dummy_key_for_case(self, case: GuideCase | None) -> str:
         if not case:
             return "fixture_240x240"
@@ -1588,10 +1863,11 @@ class AppGUI:
             return
 
         cfg_path = Path(app_dir()) / "config.ini"
-        selected_name, stations, station_map = load_station_cfg(cfg_path)
+        _selected_name, stations, station_map = load_station_cfg(cfg_path)
 
-        # nếu config chưa có selected -> default = station đầu tiên (UI sẽ dirty=False)
-        base_selected = selected_name or (stations[0].name if stations else "")
+        selected_raw = self._read_selected_station_raw(cfg_path)
+        base_selected = selected_raw if (selected_raw in station_map) else ""   # quan trọng!
+        
 
         # ===== THEME =====
         BG = "#111111"
@@ -1677,7 +1953,8 @@ class AppGUI:
         cv_list.bind_all("<Button-5>", _on_linux_dn)
 
         # ===== Build items =====
-        cur = {"name": base_selected}
+        # cur = {"name": base_selected}
+        cur = {"name": base_selected or (stations[0].name if stations else "")}
         item_refs = {}
 
         def _apply_style(name: str):
@@ -1803,81 +2080,100 @@ class AppGUI:
 
         def _confirm():
             name = cur["name"]
-            
-            if name:
-                st = station_map.get(name)
-                if not st:
-                    _cancel()
-                    return
-                # update label Station ngay
-                try:
-                    for w in self._iter_windows():
-                        ws = self._get_widgets(w)
-                        t = ws.get("selected_station")
-                        if t:
-                            t.configure(text=f"Station: {name}")
-                except Exception:
-                    pass
+            if not name:
+                _cancel()
+                return
 
-                # lưu ini
-                try:
-                    self._ini_set_selected_station(name)
-                except Exception:
-                    pass
+            plan = get_test_plan(cfg_path, name)
+            if not plan:
+                self._update_logs_panel(f"[station] test plan '{name}' invalid / not found", "red")
+                return
 
-                try:
-                    self._update_ini_selected_station(cfg_path, name)
-                    # 2) write slot_test + slot_cmd into ini
-                    for i in range(1, 13):
-                        update_ini_manual_slot_info(
-                            cfg_path,
-                            slot_idx=i,
-                            slot_test=st.slot_test.get(i, ""),
-                            slot_cmd=st.slot_command.get(i, ""),
-                        )
-                        update_ini_slot_guide(
-                            cfg_path,
-                            slot_idx=i,
-                            guide_text=st.slot_guide.get(i, ""),
-                        )
-                        update_ini_slot_image(cfg_path, slot_idx=i, image_key=st.slot_image.get(i, ""))
-                except Exception:
-                    pass
+            try:
+                apply_test_plan_to_config_ini(cfg_path, plan, write_expect_reject=True)
+            except Exception as e:
+                self._update_logs_panel(f"[station] apply plan failed: {e}", "red")
+                return
 
-                # 3) reset SLOT_STATUS to idle/item according to SLOT_TEST
-                try:
-                    reset_slot_status_section_to_idle(cfg_path)
-                except Exception:
-                    pass
-                
-                # 4) reload fixture cfg & refresh slot widgets text/font/status
-                self.fx_cfg = load_fixture_cfg(cfg_path)
-
-                # update each window slots UI
-                for w in self._iter_windows():
-                    wws = self._get_widgets(w)
-                    if not wws:
-                        continue
-                    for i in range(1, 13):
-                        slotw = wws.get(f"slot{i}")
-                        if not slotw:
-                            continue
-                        text = self.fx_cfg.slot_text.get(i, "")
-                        font = choose_slot_font(text)
-                        try:
-                            slotw.configure(text=text, font=font)
-                        except Exception:
-                            try:
-                                slotw.configure(text=text)
-                            except Exception:
-                                pass
-                
-                # 5) rebuild guide preview steps based on new config.ini
-                self._guide_reset()  # sẽ build lại preview + goto step 0
-
-                self._guide_rebuild_preview_all()
-
+            # reload config -> render lại GUI
+            self._reload_from_config_and_render()
             _cancel()
+            # name = cur["name"]
+            
+            # if name:
+            #     st = station_map.get(name)
+            #     if not st:
+            #         _cancel()
+            #         return
+            #     # update label Station ngay
+            #     try:
+            #         for w in self._iter_windows():
+            #             ws = self._get_widgets(w)
+            #             t = ws.get("selected_station")
+            #             if t:
+            #                 t.configure(text=f"Station: {name}")
+            #     except Exception:
+            #         pass
+
+            #     # lưu ini
+            #     try:
+            #         self._ini_set_selected_station(name)
+            #     except Exception:
+            #         pass
+
+            #     try:
+            #         self._update_ini_selected_station(cfg_path, name)
+            #         # 2) write slot_test + slot_cmd into ini
+            #         for i in range(1, 13):
+            #             update_ini_manual_slot_info(
+            #                 cfg_path,
+            #                 slot_idx=i,
+            #                 slot_test=st.slot_test.get(i, ""),
+            #                 slot_cmd=st.slot_command.get(i, ""),
+            #             )
+            #             update_ini_slot_guide(
+            #                 cfg_path,
+            #                 slot_idx=i,
+            #                 guide_text=st.slot_guide.get(i, ""),
+            #             )
+            #             update_ini_slot_image(cfg_path, slot_idx=i, image_key=st.slot_image.get(i, ""))
+            #     except Exception:
+            #         pass
+
+            #     # 3) reset SLOT_STATUS to idle/item according to SLOT_TEST
+            #     try:
+            #         reset_slot_status_section_to_idle(cfg_path)
+            #     except Exception:
+            #         pass
+                
+            #     # 4) reload fixture cfg & refresh slot widgets text/font/status
+            #     self.fx_cfg = load_fixture_cfg(cfg_path)
+
+            #     # update each window slots UI
+            #     for w in self._iter_windows():
+            #         wws = self._get_widgets(w)
+            #         if not wws:
+            #             continue
+            #         for i in range(1, 13):
+            #             slotw = wws.get(f"slot{i}")
+            #             if not slotw:
+            #                 continue
+            #             text = self.fx_cfg.slot_text.get(i, "")
+            #             font = choose_slot_font(text)
+            #             try:
+            #                 slotw.configure(text=text, font=font)
+            #             except Exception:
+            #                 try:
+            #                     slotw.configure(text=text)
+            #                 except Exception:
+            #                     pass
+                
+            #     # 5) rebuild guide preview steps based on new config.ini
+            #     self._guide_reset()  # sẽ build lại preview + goto step 0
+
+            #     self._guide_rebuild_preview_all()
+
+            # _cancel()
 
         # Confirm: mặc định ẩn, chỉ hiện khi dirty
         btn_confirm = bind_canvas_button(
@@ -2697,57 +2993,198 @@ class AppGUI:
         with open(cfg_path, "w", encoding="utf-8") as f:
             cfg.write(f)
             
+    # def _guide_build_plan(self) -> list[GuideCase]:
+    #     """Đọc config.ini và build plan các slot có nội dung test."""
+    #     try:
+    #         self.fx_cfg = load_fixture_cfg(app_dir() / "config.ini")
+    #     except Exception:
+    #         pass
+
+    #     plan: list[GuideCase] = []
+    #     fx = getattr(self, "fx_cfg", None)
+    #     if fx is not None:
+    #         for slot_id in range(1, 13):
+    #             lbl = (fx.slot_text.get(slot_id, "") or "").strip()
+                
+    #             if not lbl:
+    #                 continue
+    #             cmd0 = (fx.slot_command.get(slot_id, "") or "").strip()
+    #             guide = (fx.slot_guide.get(slot_id, "") or "").strip()
+    #             img = (fx.slot_image.get(slot_id, "") or "").strip()
+                
+    #             # lấy station hiện tại
+    #             selected, stations, station_map = load_station_cfg(self.cfg_path)
+    #             st = station_map.get(selected or "")
+    #             expect_s = ""
+    #             reject_s = ""
+    #             if st:
+    #                 up_label = (lbl or "").upper()
+    #                 up_cmd = (cmd0 or "").upper()
+
+    #                 if "STOP" in up_label or "FORCE" in up_label:
+    #                     expect_s = st.cmds.get("stop_expect", "")
+    #                     reject_s = st.cmds.get("stop_reject", "")
+    #                 elif "SENSOR" in up_label:
+    #                     expect_s = st.cmds.get("sensor_expect", "")
+    #                     reject_s = st.cmds.get("sensor_reject", "")
+    #                 elif "RASTER" in up_cmd or "RASTER" in up_label:
+    #                     expect_s = st.cmds.get("raster_expect", "")
+    #                     reject_s = st.cmds.get("raster_reject", "")
+    #                 else:
+    #                     expect_s = st.cmds.get("expect", "")
+    #                     reject_s = st.cmds.get("reject", "")
+                        
+    #             plan.append(self._guide_make_case(slot_id, lbl, cmd0,guide_text=guide, image_key=img, 
+    #                 expect_regex=expect_s,
+    #                 reject_regex=reject_s,))
+
+    #     # fallback tối thiểu (để không crash UI)
+    #     if not plan:
+    #         plan = [self._guide_make_case(1, "IN", "IN CLOSE")]
+
+    #     return plan
+    
     def _guide_build_plan(self) -> list[GuideCase]:
-        """Đọc config.ini và build plan các slot có nội dung test."""
+        """Đọc config.ini và build plan các slot có nội dung test.
+        Guide chỉ đọc pattern từ config.ini (SLOT_EXPECT/SLOT_REJECT), không đọc CSV.
+        """
+        def _is_tp_filename(s: str) -> bool:
+            s = (s or "").strip().lower()
+            return s.endswith((".png", ".gif", ".ppm", ".pgm"))
+
+        # --- preload testplan images (nếu SLOT_IMAGE là filename) ---
+        tp_map: dict[str, str] = {}
+        tp_map_l: dict[str, str] = {}   # ✅ để trống trước
+
+        import configparser
+
+        # 1) reload fixture cfg (slot_text/cmd/guide/img) từ config.ini như cũ
         try:
-            self.fx_cfg = load_fixture_cfg(app_dir() / "config.ini")
+            self.fx_cfg = load_fixture_cfg(self.cfg_path)
         except Exception:
             pass
 
+        # 2) đọc trực tiếp config.ini để lấy SLOT_EXPECT / SLOT_REJECT
+        cfg = configparser.ConfigParser(strict=False)
+        try:
+            cfg.read(str(self.cfg_path), encoding="utf-8")
+        except Exception:
+            pass
+
+        def _slot_pat(section: str, slot_id: int) -> str:
+            if not cfg.has_section(section):
+                return ""
+            return (cfg.get(section, f"slot{slot_id}", fallback="") or "").strip()
+
+        # (optional) fallback config-only: đọc station section trong ini (KHÔNG gọi load_station_cfg)
+        selected_station = (cfg.get("STATION", "selected_station", fallback="") or "").strip()
+        st_sec = f"STATION_{selected_station}" if selected_station else ""
+
+        
+        
+        def _st_pat(key: str) -> str:
+            if st_sec and cfg.has_section(st_sec):
+                return (cfg.get(st_sec, key, fallback="") or "").strip()
+            return ""
+
         plan: list[GuideCase] = []
         fx = getattr(self, "fx_cfg", None)
+
         if fx is not None:
+            try:
+                # selected_station bạn đã đọc ở trên rồi:
+                # selected_station = (cfg.get("STATION", "selected_station", fallback="") or "").strip()
+
+                def _log_img(msg: str):
+                    try:
+                        if getattr(self, "widgets_main", None):
+                            self._update_logs_panel(msg, "yellow")
+                        else:
+                            print(msg)
+                    except Exception:
+                        print(msg)
+
+                tp_dir = Path(self.cfg_path).resolve().parent / "test_plan"
+                if selected_station and tp_dir.is_dir():
+                    tp_files: list[str] = []
+                    for i in range(1, 13):
+                        v = (fx.slot_image.get(i, "") or "").strip()
+                        if _is_tp_filename(v):
+                            tp_files.append(v)
+                            print(v)
+                    if tp_files:
+                        tp_map = load_assets.preload_testplan_images(
+                            root=self.root,
+                            assets=self.assets,                 # <-- append vào dict này
+                            test_plan_dir=tp_dir,
+                            station_name=selected_station,
+                            image_filenames=tp_files,
+                            log=lambda m: _log_img(m),
+                            batch_ms=1,
+                            max_per_tick=999,                   # để load “gần như ngay” cho guide preview
+                        )
+
+                    tp_map_l = {k.lower(): v for k, v in (tp_map or {}).items()}
+            except Exception as e:
+                _log_img(f"[img] preload exception: {e}")
+            
             for slot_id in range(1, 13):
                 lbl = (fx.slot_text.get(slot_id, "") or "").strip()
-                
                 if not lbl:
                     continue
+
                 cmd0 = (fx.slot_command.get(slot_id, "") or "").strip()
                 guide = (fx.slot_guide.get(slot_id, "") or "").strip()
-                img = (fx.slot_image.get(slot_id, "") or "").strip()
-                
-                # lấy station hiện tại
-                selected, stations, station_map = load_station_cfg(self.cfg_path)
-                st = station_map.get(selected or "")
-                expect_s = ""
-                reject_s = ""
-                if st:
+                img0 = (fx.slot_image.get(slot_id, "") or "").strip()
+
+                if _is_tp_filename(img0):
+                    print(f"img0: {img0}")
+                    img = tp_map_l.get(img0.lower(), "fixture_240x240")  # fallback nếu thiếu file
+                else:
+                    img = img0 or "fixture_240x240"
+
+                # ✅ Ưu tiên per-slot pattern từ config.ini
+                expect_s = _slot_pat("SLOT_EXPECT", slot_id)
+                reject_s = _slot_pat("SLOT_REJECT", slot_id)
+
+                # Nếu slot chưa có pattern -> fallback theo station section trong config.ini (nếu có),
+                # còn không thì dùng mặc định "NG"/"OK"
+                if not expect_s and not reject_s:
                     up_label = (lbl or "").upper()
                     up_cmd = (cmd0 or "").upper()
 
                     if "STOP" in up_label or "FORCE" in up_label:
-                        expect_s = st.cmds.get("stop_expect", "")
-                        reject_s = st.cmds.get("stop_reject", "")
+                        expect_s = _st_pat("stop_expect") or _st_pat("expect") or "NG"
+                        reject_s = _st_pat("stop_reject") or _st_pat("reject") or "OK"
                     elif "SENSOR" in up_label:
-                        expect_s = st.cmds.get("sensor_expect", "")
-                        reject_s = st.cmds.get("sensor_reject", "")
+                        expect_s = _st_pat("sensor_expect") or _st_pat("expect") or "NG"
+                        reject_s = _st_pat("sensor_reject") or _st_pat("reject") or "OK"
                     elif "RASTER" in up_cmd or "RASTER" in up_label:
-                        expect_s = st.cmds.get("raster_expect", "")
-                        reject_s = st.cmds.get("raster_reject", "")
+                        expect_s = _st_pat("raster_expect") or _st_pat("expect") or "NG"
+                        reject_s = _st_pat("raster_reject") or _st_pat("reject") or "OK"
                     else:
-                        expect_s = st.cmds.get("expect", "")
-                        reject_s = st.cmds.get("reject", "")
-                        
-                plan.append(self._guide_make_case(slot_id, lbl, cmd0,guide_text=guide, image_key=img, 
-                    expect_regex=expect_s,
-                    reject_regex=reject_s,))
+                        expect_s = _st_pat("expect") or "NG"
+                        reject_s = _st_pat("reject") or "OK"
+                else:
+                    # nếu chỉ thiếu 1 vế thì bù default
+                    expect_s = expect_s or "NG"
+                    reject_s = reject_s or "OK"
+
+                plan.append(
+                    self._guide_make_case(
+                        slot_id, lbl, cmd0,
+                        guide_text=guide,
+                        image_key=img,
+                        expect_regex=expect_s,
+                        reject_regex=reject_s,
+                    )
+                )
 
         # fallback tối thiểu (để không crash UI)
         if not plan:
             plan = [self._guide_make_case(1, "IN", "IN CLOSE")]
 
         return plan
-
 
     def _guide_patch_step_all(self, idx: int, *, title=None, image_key=None, confirm_text=None, title_fill=None):
         for gp in self._iter_guide_panels():

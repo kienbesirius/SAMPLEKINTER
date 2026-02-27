@@ -10,6 +10,41 @@ from io import StringIO
 import tempfile
 from pathlib import Path
 
+_UTF8_BOM = b"\xef\xbb\xbf"
+
+def strip_utf8_bom_inplace(path: str | Path) -> bool:
+    """
+    Xóa UTF-8 BOM ở đầu file (nếu có) và ghi lại file.
+    Return True nếu đã xóa BOM, False nếu không có BOM hoặc file không tồn tại.
+    """
+    p = Path(path)
+    if not p.is_file():
+        return False
+
+    data = p.read_bytes()
+    if not data.startswith(_UTF8_BOM):
+        return False
+
+    new_data = data[len(_UTF8_BOM):]
+
+    # atomic write: ghi ra temp trong cùng thư mục rồi replace
+    with tempfile.NamedTemporaryFile("wb", delete=False, dir=str(p.parent), prefix=p.name + ".", suffix=".tmp") as f:
+        tmp_path = Path(f.name)
+        f.write(new_data)
+        f.flush()
+        os.fsync(f.fileno())
+
+    os.replace(str(tmp_path), str(p))
+    return True
+
+
+def try_strip_utf8_bom(path: str | Path) -> None:
+    """Không throw: có lỗi thì bỏ qua."""
+    try:
+        strip_utf8_bom_inplace(path)
+    except Exception:
+        pass
+
 ENDING_MAP = {
     "CRLF": "\r\n",
     "LF": "\n",
@@ -40,7 +75,9 @@ class FixtureConfig:
 def load_fixture_cfg(path: str) -> FixtureConfig:
     # strict=False để không crash nếu config có key trùng (slot8 bị lặp)
     cfg = configparser.ConfigParser(strict=False)
-    cfg.read(path, encoding="utf-8")
+    # cfg.read(path, encoding="utf-8")
+    try_strip_utf8_bom(path)
+    cfg.read(path, encoding=_ini_encoding("utf-8"))
 
 
     port = cfg.get("FIXTURE", "port", fallback="").strip()
@@ -92,7 +129,7 @@ def update_ini_fixture_section(
     path = Path(ini_path)
     raw = path.read_bytes() if path.exists() else b""
     newline = "\r\n" if b"\r\n" in raw else "\n"
-    lines = (raw.decode(encoding, errors="replace").splitlines() if raw else [])
+    lines = (raw.decode(_ini_encoding(encoding), errors="replace").splitlines() if raw else [])
 
     start, end = _find_section_bounds(lines, section_name)
     if start is None:
@@ -151,7 +188,7 @@ def update_ini_slot_guide(
     if path.exists():
         raw = path.read_bytes()
         newline = _detect_newline(raw)
-        lines = raw.decode(encoding, errors="replace").splitlines()
+        lines = raw.decode(_ini_encoding(encoding), errors="replace").splitlines()
     else:
         newline = "\n"
         lines = []
@@ -212,7 +249,7 @@ def update_ini_slot_image(
     if path.exists():
         raw = path.read_bytes()
         newline = _detect_newline(raw)
-        lines = raw.decode(encoding, errors="replace").splitlines()
+        lines = raw.decode(_ini_encoding(encoding), errors="replace").splitlines()
     else:
         newline = "\n"
         lines = []
@@ -325,7 +362,7 @@ def reset_slot_status_section_to_idle(
     raw = path.read_bytes()
     newline = "\r\n" if b"\r\n" in raw else "\n"
 
-    text = raw.decode(encoding, errors="replace")
+    text = raw.decode(_ini_encoding(encoding), errors="replace")
     lines = text.splitlines()
 
     # --------- 1) parse SLOT_TEST -> set các slot "active" ----------
@@ -503,7 +540,7 @@ def update_ini_slot_status(
     if path.exists():
         raw = path.read_bytes()
         newline = _detect_newline(raw)
-        text = raw.decode(encoding, errors="replace")
+        text = raw.decode(_ini_encoding(encoding), errors="replace")
         lines = text.splitlines()
     else:
         newline = "\n"
@@ -688,7 +725,7 @@ def update_ini_manual_slot_info(
     if path.exists():
         raw = path.read_bytes()
         newline = _detect_newline(raw)
-        lines = raw.decode(encoding, errors="replace").splitlines()
+        lines = raw.decode(_ini_encoding(encoding), errors="replace").splitlines()
     else:
         newline = "\n"
         lines = []
@@ -837,6 +874,405 @@ def _parse_station_slot_line(v: str) -> tuple[str, str, str, str]:
     guide = guide.replace(r"\n", "\n")
     return test, cmd, guide, img
 
+
+# ===================== TEST PLAN CSV (new) =====================
+# Quy ước:
+# - test_plan/ nằm cùng level với config.ini và file binary
+# - mỗi file: <StationName>.csv
+# - dòng đầu tiên (meta): StationName,bechjkjen,...
+#   + StationName phải TRÙNG tên file (stem)
+#   + cột 2 phải đúng "bechjkjen" (lowercase) -> nếu không thì bỏ qua file
+#
+# CSV format tối thiểu (sau meta + header):
+# slot,slot_text,slot_cmd,expect,reject,sensor_expect/raster_expect,sensor_reject/raster_reject,stop_expect,stop_reject,guide,image_guide,note
+
+_TESTPLAN_OWNER_TAG = "bechjkjen"
+
+@dataclass(frozen=True)
+class TestPlan:
+    name: str
+    station: Station
+    slot_expect: Dict[int, str]
+    slot_reject: Dict[int, str]
+    source_csv: Path
+
+_KEYVAL_RE_TEMPLATE = r"^(\s*)({key})(\s*=\s*)(.*?)(\s*)$"
+
+def _strip_outer_quotes(s: str) -> str:
+    s = (s or "").strip()
+    # bỏ nhiều lớp quote nếu có (vd: """text""" )
+    while len(s) >= 2 and ((s[0] == s[-1] == '"') or (s[0] == s[-1] == "'")):
+        s = s[1:-1].strip()
+    return s
+
+def _decode_guide_text(s: str) -> str:
+    s = _strip_outer_quotes(s)
+    return (s or "").replace(r"\n", "\n").strip()
+
+def _encode_guide_for_ini(s: str) -> str:
+    # ini giữ 1 dòng, dùng literal \n
+    return (s or "").replace("\n", r"\n")
+
+def get_test_plan_dir(
+    ini_path: Union[str, Path],
+    *,
+    test_plan_dirname: str = "test_plan",
+) -> Path:
+    """
+    Trả về path thư mục test_plan/ cùng level với config.ini.
+    """
+    base_dir = Path(ini_path).resolve().parent
+    return base_dir / test_plan_dirname
+
+def list_test_plans(
+    ini_path: Union[str, Path],
+    *,
+    test_plan_dirname: str = "test_plan",
+    owner_tag: str = _TESTPLAN_OWNER_TAG,
+) -> Tuple[List[str], Dict[str, Path]]:
+    """
+    Scan test_plan/*.csv và trả về:
+      (list_station_names, map_name_to_csv_path)
+
+    Rule:
+      - file stem (VD: Hapuka_MT) phải == meta[0]
+      - meta[1].lower() phải == owner_tag (default: bechjkjen)
+    """
+    d = get_test_plan_dir(ini_path, test_plan_dirname=test_plan_dirname)
+    mp: Dict[str, Path] = {}
+    if not d.exists() or not d.is_dir():
+        return [], {}
+
+    for p in sorted(d.glob("*.csv"), key=lambda x: x.name.lower()):
+        try:
+            with p.open("r", encoding="utf-8-sig", newline="") as f:
+                r = csv.reader(f)
+                meta = next(r, None)
+                if not meta or len(meta) < 2:
+                    continue
+                name0 = (meta[0] or "").strip()
+                tag0 = (meta[1] or "").strip().lower()
+                if not name0:
+                    continue
+                if name0 != p.stem:
+                    continue
+                if tag0 != (owner_tag or "").strip().lower():
+                    continue
+                mp[name0] = p
+        except Exception:
+            continue
+
+    names = list(mp.keys())
+    return names, mp
+
+def _parse_test_plan_csv(
+    csv_path: Path,
+    *,
+    owner_tag: str = _TESTPLAN_OWNER_TAG,
+    slots: int = 12,
+) -> Optional[TestPlan]:
+    """
+    Parse 1 file test plan .csv -> TestPlan
+    """
+    if not csv_path.exists():
+        return None
+
+    stem = csv_path.stem
+    try_strip_utf8_bom(csv_path)
+    with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
+        r = csv.reader(f)
+        meta = next(r, None)
+        if not meta or len(meta) < 2:
+            return None
+        name0 = (meta[0] or "").strip()
+        tag0 = (meta[1] or "").strip().lower()
+
+        if name0 != stem:
+            return None
+        if tag0 != (owner_tag or "").strip().lower():
+            return None
+
+        # optional meta commands (nếu có)
+        open_cmd = (meta[2].strip() if len(meta) > 2 else "") or "open"
+        close_cmd = (meta[3].strip() if len(meta) > 3 else "") or "close"
+        status_cmd = (meta[4].strip() if len(meta) > 4 else "") or "status"
+        raster_state_cmd = (meta[5].strip() if len(meta) > 5 else "") or "RASTER_STATE"
+
+        # skip header line
+        _hdr = next(r, None)
+
+        slot_test: Dict[int, str] = {i: "" for i in range(1, slots + 1)}
+        slot_command: Dict[int, str] = {i: "" for i in range(1, slots + 1)}
+        slot_guide: Dict[int, str] = {i: "" for i in range(1, slots + 1)}
+        slot_image: Dict[int, str] = {i: "" for i in range(1, slots + 1)}
+        slot_expect: Dict[int, str] = {i: "" for i in range(1, slots + 1)}
+        slot_reject: Dict[int, str] = {i: "" for i in range(1, slots + 1)}
+
+        # station-level patterns: lấy theo dòng đầu tiên có giá trị
+        expect = reject = ""
+        sensor_expect = sensor_reject = ""
+        stop_expect = stop_reject = ""
+        raster_expect = raster_reject = ""
+
+        def _first_non_empty(cur: str, new: str) -> str:
+            return cur or (new or "").strip()
+
+        for row in r:
+            if not row:
+                continue
+            # pad to 12 cols
+            if len(row) < 12:
+                row = row + [""] * (12 - len(row))
+
+            # parse slot index
+            try:
+                idx = int((row[0] or "").strip())
+            except Exception:
+                continue
+            if not (1 <= idx <= slots):
+                continue
+
+            st = (row[1] or "").strip()
+            sc = (row[2] or "").strip()
+
+            row_expect = (row[3] or "").strip()
+            row_reject = (row[4] or "").strip()
+
+            # NOTE: file đang gộp sensor/raster chung 1 cột
+            row_sensor_exp = (row[5] or "").strip()
+            row_sensor_rej = (row[6] or "").strip()
+
+            row_stop_exp = (row[7] or "").strip()
+            row_stop_rej = (row[8] or "").strip()
+
+            gd = _decode_guide_text(row[9] or "")
+            im = (row[10] or "").strip()
+
+            slot_test[idx] = st
+            slot_command[idx] = sc
+            slot_guide[idx] = gd
+            slot_image[idx] = im
+
+            # capture station-level patterns (first non-empty)
+            expect = _first_non_empty(expect, row_expect)
+            reject = _first_non_empty(reject, row_reject)
+
+            sensor_expect = _first_non_empty(sensor_expect, row_sensor_exp)
+            sensor_reject = _first_non_empty(sensor_reject, row_sensor_rej)
+
+            stop_expect = _first_non_empty(stop_expect, row_stop_exp)
+            stop_reject = _first_non_empty(stop_reject, row_stop_rej)
+
+            raster_expect = _first_non_empty(raster_expect, row_sensor_exp)   # share
+            raster_reject = _first_non_empty(raster_reject, row_sensor_rej)   # share
+
+            # derive per-slot expect/reject (để fill SLOT_EXPECT / SLOT_REJECT nếu muốn)
+            up_lbl = st.upper()
+            up_cmd = sc.upper()
+
+            if "STOP" in up_lbl or "FORCE" in up_lbl:
+                e = row_stop_exp or row_expect
+                rj = row_stop_rej or row_reject
+            elif "SENSOR" in up_lbl:
+                e = row_sensor_exp or row_expect
+                rj = row_sensor_rej or row_reject
+            elif "RASTER" in up_cmd or "RASTER" in up_lbl:
+                e = row_sensor_exp or row_expect
+                rj = row_sensor_rej or row_reject
+            else:
+                e = row_expect
+                rj = row_reject
+
+            slot_expect[idx] = (e or "").strip()
+            slot_reject[idx] = (rj or "").strip()
+
+        cmds = {k: "" for k in _STATION_CMD_KEYS}
+        cmds["open_cmd"] = open_cmd
+        cmds["close_cmd"] = close_cmd
+        cmds["status_cmd"] = status_cmd
+        cmds["raster_state_cmd"] = raster_state_cmd
+
+        cmds["expect"] = expect
+        cmds["reject"] = reject
+        cmds["sensor_expect"] = sensor_expect
+        cmds["sensor_reject"] = sensor_reject
+        cmds["stop_expect"] = stop_expect
+        cmds["stop_reject"] = stop_reject
+        cmds["raster_expect"] = raster_expect
+        cmds["raster_reject"] = raster_reject
+
+        st_obj = Station(
+            name=name0,
+            cmds=cmds,
+            slot_test=slot_test,
+            slot_command=slot_command,
+            slot_guide=slot_guide,
+            slot_image=slot_image,
+        )
+
+        return TestPlan(
+            name=name0,
+            station=st_obj,
+            slot_expect=slot_expect,
+            slot_reject=slot_reject,
+            source_csv=csv_path,
+        )
+
+def get_test_plan(
+    ini_path: Union[str, Path],
+    station_name: str,
+    *,
+    test_plan_dirname: str = "test_plan",
+    owner_tag: str = _TESTPLAN_OWNER_TAG,
+    slots: int = 12,
+) -> Optional[TestPlan]:
+    """
+    Load 1 test plan theo tên trạm (tên == tên file stem).
+    """
+    _names, mp = list_test_plans(ini_path, test_plan_dirname=test_plan_dirname, owner_tag=owner_tag)
+    p = mp.get(station_name)
+    if not p:
+        return None
+    return _parse_test_plan_csv(p, owner_tag=owner_tag, slots=slots)
+
+def update_ini_selected_station(
+    ini_path: Union[str, Path],
+    station_name: str,
+    *,
+    section_name: str = "STATION",
+    key_name: str = "selected_station",
+    encoding: str = "utf-8",
+) -> None:
+    """
+    Text-based upsert:
+      [STATION]
+      selected_station = <station_name>
+    """
+    path = Path(ini_path)
+    raw = path.read_bytes() if path.exists() else b""
+    newline = _detect_newline(raw) if raw else "\n"
+    lines = raw.decode(_ini_encoding(encoding), errors="replace").splitlines() if raw else []
+
+    start, end = _find_section_bounds(lines, section_name)
+    if start is None:
+        if lines and lines[-1].strip() != "":
+            lines.append("")
+        lines.append(f"[{section_name}]")
+        start = len(lines)
+        end = len(lines)
+    if end is None:
+        end = len(lines)
+
+    kv_re = re.compile(_KEYVAL_RE_TEMPLATE.format(key=re.escape(key_name)), re.IGNORECASE)
+
+    found = False
+    new_sec: list[str] = []
+    for ln in lines[start:end]:
+        m = kv_re.match(ln)
+        if m:
+            indent, key, eq, _old, trail = m.groups()
+            new_sec.append(f"{indent}{key}{eq}{station_name}{trail}")
+            found = True
+        else:
+            new_sec.append(ln)
+
+    if not found:
+        if new_sec and new_sec[-1].strip() != "":
+            new_sec.append("")
+        new_sec.append(f"{key_name}={station_name}")
+
+    out_text = newline.join(lines[:start] + new_sec + lines[end:]) + newline
+    _atomic_write_text(path, out_text, encoding=encoding)
+
+def _bulk_upsert_slot_section(
+    lines: list[str],
+    *,
+    section_name: str,
+    values: Dict[int, str],
+    slots: int = 12,
+    value_encoder=lambda s: s,
+) -> list[str]:
+    start, end = _find_section_bounds(lines, section_name)
+    if start is None:
+        if lines and lines[-1].strip() != "":
+            lines.append("")
+        lines.append(f"[{section_name}]")
+        start = len(lines)
+        end = len(lines)
+    if end is None:
+        end = len(lines)
+
+    seen: Set[int] = set()
+    new_sec: list[str] = []
+    for ln in lines[start:end]:
+        m = _SLOT_RE.match(ln)
+        if m:
+            indent, key, num_s, eq, _old, trail = m.groups()
+            try:
+                idx = int(num_s)
+            except ValueError:
+                new_sec.append(ln); continue
+            if 1 <= idx <= slots:
+                v = value_encoder(values.get(idx, ""))
+                new_sec.append(f"{indent}{key}{idx}{eq}{v}{trail}")
+                seen.add(idx)
+                continue
+        new_sec.append(ln)
+
+    missing = [i for i in range(1, slots + 1) if i not in seen]
+    if missing:
+        if new_sec and new_sec[-1].strip() != "":
+            new_sec.append("")
+        for i in missing:
+            v = value_encoder(values.get(i, ""))
+            new_sec.append(f"slot{i}={v}")
+
+    return lines[:start] + new_sec + lines[end:]
+
+def apply_test_plan_to_config_ini(
+    ini_path: Union[str, Path],
+    plan: TestPlan,
+    *,
+    slots: int = 12,
+    encoding: str = "utf-8",
+    write_expect_reject: bool = True,
+) -> None:
+    """
+    Ghi nội dung test plan vào config.ini:
+      - [STATION] selected_station
+      - [SLOT_TEST], [SLOT_COMMAND], [SLOT_GUIDE], [SLOT_IMAGE]
+      - optionally: [SLOT_EXPECT], [SLOT_REJECT]
+      - reset SLOT_STATUS -> idle/item theo SLOT_TEST (dùng helper có sẵn)
+    """
+    path = Path(ini_path)
+
+    # 1) update selected station (atomic)
+    update_ini_selected_station(path, plan.name, encoding=encoding)
+
+    # 2) bulk update slot sections (1 atomic)
+    raw = path.read_bytes() if path.exists() else b""
+    newline = _detect_newline(raw) if raw else "\n"
+    lines = raw.decode(_ini_encoding(encoding), errors="replace").splitlines() if raw else []
+
+    lines = _bulk_upsert_slot_section(lines, section_name="SLOT_TEST", values=plan.station.slot_test, slots=slots)
+    lines = _bulk_upsert_slot_section(lines, section_name="SLOT_COMMAND", values=plan.station.slot_command, slots=slots)
+    lines = _bulk_upsert_slot_section(lines, section_name="SLOT_GUIDE", values=plan.station.slot_guide, slots=slots, value_encoder=_encode_guide_for_ini)
+    lines = _bulk_upsert_slot_section(lines, section_name="SLOT_IMAGE", values=plan.station.slot_image, slots=slots)
+
+    if write_expect_reject:
+        lines = _bulk_upsert_slot_section(lines, section_name="SLOT_EXPECT", values=plan.slot_expect, slots=slots)
+        lines = _bulk_upsert_slot_section(lines, section_name="SLOT_REJECT", values=plan.slot_reject, slots=slots)
+
+    out_text = newline.join(lines) + newline
+    _atomic_write_text(path, out_text, encoding=encoding)
+
+    # 3) update SLOT_STATUS to idle/item based on SLOT_TEST
+    try:
+        reset_slot_status_section_to_idle(path, slots=slots, encoding=encoding)
+    except Exception:
+        pass
+
+
 def load_station_cfg(
     path: Union[str, Path],
     *,
@@ -844,29 +1280,55 @@ def load_station_cfg(
     station_root_section: str = "STATION",
     station_prefix: str = "STATION_",
     cmd_keys: Tuple[str, ...] = _STATION_CMD_KEYS,
-    slots: int = 12,   # <-- NEW
+    slots: int = 12,
+    # NEW: test plan folder
+    test_plan_dirname: str = "test_plan",
+    owner_tag: str = _TESTPLAN_OWNER_TAG,
 ) -> Tuple[Optional[str], List[Station], Dict[str, Station]]:
     """
     Return: (selected_station_name, stations_list, station_map)
 
-    - Ưu tiên đọc thứ tự từ [STATION].stations (csv)
-    - Fallback: scan all sections STATION_<NAME>
-    - Mỗi station có:
-        + cmds dict (như cũ)
-        + slot_test / slot_command dict theo slot1..slot{slots}
-          Format trong ini: slot1 = <slot_test>, <slot_command>
+    Ưu tiên:
+      1) test_plan/*.csv (theo rule meta: <stem>,bechjkjen)
+      2) fallback legacy ini: [STATION].stations + sections [STATION_<NAME>]
+
+    Notes:
+      - Khi dùng CSV: list station = danh sách file hợp lệ trong test_plan/
+      - selected_station vẫn lấy từ config.ini ([STATION].selected_station)
     """
     cfg = configparser.ConfigParser(strict=False)
-    cfg.read(str(path), encoding=encoding)
+    try_strip_utf8_bom(path)
+    cfg.read(str(path), encoding=_ini_encoding(encoding))
 
     selected = cfg.get(station_root_section, "selected_station", fallback="").strip() or None
 
-    # 1) lấy list station theo order nếu có
+    # ===== 1) CSV test plan (preferred) =====
+    names, mp = list_test_plans(path, test_plan_dirname=test_plan_dirname, owner_tag=owner_tag)
+    if names:
+        stations_list: List[Station] = []
+        station_map: Dict[str, Station] = {}
+
+        for nm in names:
+            p = mp.get(nm)
+            if not p:
+                continue
+            plan = _parse_test_plan_csv(p, owner_tag=owner_tag, slots=slots)
+            if not plan:
+                continue
+            stations_list.append(plan.station)
+            station_map[nm] = plan.station
+
+        # normalize selected
+        if selected not in station_map:
+            selected = stations_list[0].name if stations_list else None
+
+        return selected, stations_list, station_map
+
+    # ===== 2) Legacy INI stations =====
     station_names: List[str] = []
     if cfg.has_section(station_root_section):
         station_names = _split_csv(cfg.get(station_root_section, "stations", fallback=""))
 
-    # 2) fallback scan nếu list rỗng
     if not station_names:
         for sec in cfg.sections():
             if sec.upper().startswith(station_prefix.upper()):
@@ -875,13 +1337,12 @@ def load_station_cfg(
                     station_names.append(name)
         station_names.sort(key=lambda x: x.upper())
 
-    stations_list: List[Station] = []
-    station_map: Dict[str, Station] = {}
+    stations_list = []
+    station_map = {}
 
     for name in station_names:
         sec = f"{station_prefix}{name}"
 
-        # defaults (kể cả khi thiếu section)
         cmds = {k: "" for k in cmd_keys}
         slot_test: Dict[int, str] = {i: "" for i in range(1, slots + 1)}
         slot_command: Dict[int, str] = {i: "" for i in range(1, slots + 1)}
@@ -889,14 +1350,12 @@ def load_station_cfg(
         slot_image: Dict[int, str] = {i: "" for i in range(1, slots + 1)}
 
         if cfg.has_section(sec):
-            # --- cmds (như cũ) ---
             for k in cmd_keys:
                 cmds[k] = cfg.get(sec, k, fallback="").strip()
 
-            # --- slots (NEW) ---
             for i in range(1, slots + 1):
                 raw = cfg.get(sec, f"slot{i}", fallback="").strip()
-                st, sc, gd, im = _parse_station_slot_line(raw)  # NEW
+                st, sc, gd, im = _parse_station_slot_line(raw)
                 slot_test[i] = st
                 slot_command[i] = sc
                 slot_guide[i] = gd
@@ -913,9 +1372,11 @@ def load_station_cfg(
         stations_list.append(st_obj)
         station_map[name] = st_obj
 
-    # print(stations_list)
-    # print(station_map)
+    if selected not in station_map:
+        selected = stations_list[0].name if stations_list else None
+
     return selected, stations_list, station_map
+
 
 def _split_csv(s: str) -> List[str]:
     # "AFT, ADL1,ADL2" -> ["AFT","ADL1","ADL2"]
@@ -926,16 +1387,24 @@ def _split_csv(s: str) -> List[str]:
             out.append(p)
     return out
 
+
 def get_selected_station(
     path: Union[str, Path],
     *,
     encoding: str = "utf-8",
 ) -> Optional[Station]:
-    selected, stations_list, station_map, mp = load_station_cfg(path, encoding=encoding)
-
+    selected, _stations_list, station_map = load_station_cfg(path, encoding=encoding)
     if not selected:
         return None
-    
-    # print(stations_list)
-    print(station_map)
-    return mp.get(selected)
+    return station_map.get(selected)
+
+# Xóa BOM
+def _ini_encoding(enc: str) -> str:
+    """Normalize encoding for reading INI:
+    - utf-8 / utf8 -> utf-8-sig (auto strip BOM if present)
+    - others: keep as-is
+    """
+    e = (enc or "utf-8").strip().lower().replace("_", "-")
+    if e in ("utf8", "utf-8"):
+        return "utf-8-sig"
+    return enc

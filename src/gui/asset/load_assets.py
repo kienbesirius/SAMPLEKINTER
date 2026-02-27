@@ -1,6 +1,7 @@
 from __future__ import annotations
 import sys, os
 import hashlib
+from collections import deque
 import shutil
 import subprocess
 from pathlib import Path
@@ -292,6 +293,80 @@ ASSET_FILES = {
     "result_field": RESOURCE_PATH / "gui204_count_primes" / "result-field.png",
     "279_result_field": RESOURCE_PATH / "gui279_perfect_squares" / "279-result-field.png",
 }
+
+
+def _tp_img_key(station_name: str, img_filename: str) -> str:
+    st = (station_name or "").strip()
+    fn = (img_filename or "").strip()
+    stem = Path(fn).stem  # bỏ .png
+    return f"tp__{st}__{stem}".lower()
+
+def _tp_img_path(test_plan_dir: Path, station_name: str, img_filename: str) -> Path:
+    return (test_plan_dir / station_name / img_filename).resolve()
+
+def preload_testplan_images(
+    *,
+    root: tk.Misc,
+    assets: dict,
+    test_plan_dir: Path,
+    station_name: str,
+    image_filenames: list[str],
+    log: callable | None = None,
+    batch_ms: int = 1,          # nhịp nhỏ để không đơ UI
+    max_per_tick: int = 3,      # mỗi tick load vài ảnh
+) -> dict[str, str]:
+    """
+    Return mapping: original filename -> assets_key
+    """
+    # unique + keep order
+    seen = set()
+    queue_files = []
+    for s in image_filenames:
+        s = (s or "").strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        queue_files.append(s)
+
+    pending = deque(queue_files)
+    mapping: dict[str, str] = {}
+
+    def _tick():
+        nonlocal pending
+        n = 0
+        while pending and n < max_per_tick:
+            fn = pending.popleft()
+            key = _tp_img_key(station_name, fn)
+            mapping[fn] = key
+
+            # đã có rồi thì skip (cache)
+            if key in assets:
+                n += 1
+                continue
+
+            p = _tp_img_path(test_plan_dir, station_name, fn)
+            if not p.is_file():
+                if log:
+                    log(f"[img] missing: {p}")
+                n += 1
+                continue
+
+            try:
+                # Tk PhotoImage: png/gif tốt nhất
+                assets[key] = tk.PhotoImage(file=str(p))
+                if log:
+                    log(f"[img] loaded: {fn} -> {key}")
+            except Exception as e:
+                if log:
+                    log(f"[img] load failed: {p} ({e})")
+
+            n += 1
+
+        if pending:
+            root.after(batch_ms, _tick)
+
+    _tick()
+    return mapping
 
 def _sha256(p: Path) -> str:
     h = hashlib.sha256()
