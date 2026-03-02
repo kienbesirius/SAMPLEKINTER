@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 from src.gui.widgets.button import bind_canvas_button
 from src.gui.widgets.paint_asset import bind_canvas_asset
 from typing import Optional, Callable
+from pathlib import Path
 
 
 @dataclass
@@ -472,6 +473,68 @@ class GuidePanel:
             except Exception:
                 pass
 
+    def get_img_widget_wh(self, *, fallback=(480, 270), fill_if_missing=True) -> tuple[int, int]:
+        """
+        Return (w, h) size thật của vùng hiển thị ảnh.
+        - Ưu tiên cv_img (Canvas)
+        - Nếu chưa layout xong -> dùng reqwidth/reqheight
+        - Nếu cv_img None và fill_if_missing -> fill placeholder màu bg
+        """
+        wdg = getattr(self, "cv_img", None) or getattr(self, "_img_widget", None)
+
+        w = h = 0
+        if wdg is not None:
+            try:
+                wdg.update_idletasks()
+            except Exception:
+                pass
+
+            # size thật sau layout
+            try:
+                w = int(wdg.winfo_width())
+                h = int(wdg.winfo_height())
+            except Exception:
+                w = h = 0
+
+            # nếu gọi sớm quá -> winfo_* thường = 1, lấy size "request"
+            if w <= 1 or h <= 1:
+                try:
+                    w = int(wdg.winfo_reqwidth())
+                    h = int(wdg.winfo_reqheight())
+                except Exception:
+                    pass
+
+            # fallback cuối: cget
+            if w <= 1 or h <= 1:
+                try:
+                    w = int(wdg.cget("width"))
+                    h = int(wdg.cget("height"))
+                except Exception:
+                    pass
+
+        if w <= 1 or h <= 1:
+            w, h = fallback
+
+        # nếu cv_img None -> fill tạm bg
+        if getattr(self, "cv_img", None) is None and fill_if_missing:
+            bg = getattr(self, "bg", "#471800")
+            try:
+                # nếu _img_widget là Label
+                if isinstance(wdg, tk.Label):
+                    self._img_placeholder = tk.PhotoImage(master=wdg, width=w, height=h)
+                    self._img_placeholder.put(bg, to=(0, 0, w, h))
+                    wdg.configure(image=self._img_placeholder, bg=bg)
+                    wdg.image = self._img_placeholder
+                # nếu _img_widget là Canvas
+                elif isinstance(wdg, tk.Canvas):
+                    wdg.configure(bg=bg)
+                    wdg.delete("all")
+                    wdg.create_rectangle(0, 0, w, h, fill=bg, outline="")
+            except Exception:
+                pass
+
+        return int(w), int(h)
+    
     def _update_image(self, base_key: str) -> None:
         try:
             w = int(self.cv_img.winfo_width())

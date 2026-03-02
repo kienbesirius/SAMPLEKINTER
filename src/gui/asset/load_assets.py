@@ -314,13 +314,32 @@ def preload_testplan_images(
     log: callable | None = None,
     batch_ms: int = 1,          # nhịp nhỏ để không đơ UI
     max_per_tick: int = 3,      # mỗi tick load vài ảnh
+
+    # --- NEW (optional): nếu caller biết sẵn thì truyền để khỏi rglob ---
+    station_dir: Path | None = None,       # folder chứa csv + images
+    plan_csv_path: Path | None = None,     # path đến <Project>_<Station>.csv
+    case_insensitive_lookup: bool = True,  # Linux hay lệch case tên file
+    force_reload: bool = False,
+    cv_img_w: int =0,
+    cv_img_h: int =0,
 ) -> dict[str, str]:
     """
     Return mapping: original filename -> assets_key
+
+    Logic resolve ảnh:
+      1) Nếu station_dir được truyền -> dùng nó
+      2) Nếu plan_csv_path được truyền -> dùng plan_csv_path.parent
+      3) Fallback legacy: test_plan_dir/<station_name>/
+      4) Layout mới: tìm <station_name>.csv trong test_plan_dir/** rồi lấy parent folder
     """
+    from src.utils.resolve_fit_img import pad_to_16x9_landscape_no_scale
+
+    test_plan_dir = Path(test_plan_dir).resolve()
+    station_name = (station_name or "").strip()
+
     # unique + keep order
     seen = set()
-    queue_files = []
+    queue_files: list[str] = []
     for s in image_filenames:
         s = (s or "").strip()
         if not s or s in seen:
@@ -331,20 +350,153 @@ def preload_testplan_images(
     pending = deque(queue_files)
     mapping: dict[str, str] = {}
 
+    # -------------------------
+    # Resolve base folder
+    # -------------------------
+    def _resolve_station_folder() -> Path | None:
+        # 1) caller provided exact folder
+        if station_dir is not None:
+            try:
+                p = Path(station_dir).resolve()
+                if p.is_dir():
+                    return p
+            except Exception:
+                pass
+
+        # 2) caller provided csv path
+        if plan_csv_path is not None:
+            try:
+                p = Path(plan_csv_path).resolve()
+                if p.is_file():
+                    return p.parent
+            except Exception:
+                pass
+
+        # 3) legacy layout: test_plan/<station_name>/
+        if station_name:
+            legacy = test_plan_dir / station_name
+            if legacy.is_dir():
+                return legacy
+
+        # 4) new layout: test_plan/<Process>/<Project>/<Station>/<Project>_<Station>.csv
+        #    => rglob station_name.csv rồi lấy parent
+        if not station_name:
+            return None
+
+        # cache per (root, station) để khỏi rglob lặp
+        cache = getattr(preload_testplan_images, "_station_dir_cache", None)
+        if cache is None:
+            cache = {}
+            setattr(preload_testplan_images, "_station_dir_cache", cache)
+
+        ck = (str(test_plan_dir), station_name.lower())
+        if ck in cache:
+            p = cache[ck]
+            return p if isinstance(p, Path) and p.is_dir() else None
+
+        cand: list[Path] = []
+        try:
+            # ưu tiên match strict theo <Project>/<Station>/ nếu parse được
+            proj = stn = ""
+            if "_" in station_name:
+                proj, stn = station_name.split("_", 1)
+                proj = proj.strip()
+                stn = stn.strip()
+
+            for csv_p in test_plan_dir.rglob(f"{station_name}.csv"):
+                if not csv_p.is_file():
+                    continue
+                if proj and stn:
+                    try:
+                        if csv_p.parent.name.lower() == stn.lower() and csv_p.parent.parent.name.lower() == proj.lower():
+                            cand.append(csv_p)
+                            continue
+                    except Exception:
+                        pass
+                # fallback: cứ nhận
+                cand.append(csv_p)
+
+            cand.sort(key=lambda p: str(p).lower())
+        except Exception:
+            cand = []
+
+        if cand:
+            folder = cand[0].parent
+            cache[ck] = folder
+            if log:
+                try:
+                    log(f"[img] resolved plan folder: {folder}")
+                except Exception:
+                    pass
+            return folder
+
+        cache[ck] = None
+        return None
+
+    base_dir = _resolve_station_folder()
+
+    if log:
+        try:
+            log(f"[img] base_dir={base_dir if base_dir else '(none)'} | station={station_name}")
+        except Exception:
+            pass
+
+    # -------------------------
+    # Helpers
+    # -------------------------
+    def _safe_join_filename(base: Path, fn: str) -> Path | None:
+        # chỉ cho filename, không cho path traversal
+        if ("/" in fn) or ("\\" in fn):
+            if log:
+                log(f"[img] skip (not a filename): {fn!r}")
+            return None
+        return base / fn
+
+    def _find_case_insensitive(base: Path, fn: str) -> Path | None:
+        if not case_insensitive_lookup:
+            return None
+        try:
+            low = fn.lower()
+            for x in base.iterdir():
+                if x.is_file() and x.name.lower() == low:
+                    return x
+        except Exception:
+            pass
+        return None
+
+    # -------------------------
+    # Batched loader
+    # -------------------------
     def _tick():
         nonlocal pending
         n = 0
         while pending and n < max_per_tick:
             fn = pending.popleft()
-            key = _tp_img_key(station_name, fn)
+            key = _tp_img_key(station_name, fn)   # giữ nguyên key scheme của bạn
             mapping[fn] = key
 
             # đã có rồi thì skip (cache)
-            if key in assets:
+            if key in assets and not force_reload:
                 n += 1
                 continue
 
-            p = _tp_img_path(test_plan_dir, station_name, fn)
+            if base_dir is None:
+                if log:
+                    log(f"[img] missing base_dir -> skip: {fn}")
+                n += 1
+                continue
+
+            p = _safe_join_filename(base_dir, fn)
+            if p is None:
+                n += 1
+                continue
+
+            if not p.is_file():
+                # thử case-insensitive (Linux)
+                alt = _find_case_insensitive(base_dir, fn)
+                if alt is not None:
+                    p = alt
+
             if not p.is_file():
                 if log:
                     log(f"[img] missing: {p}")
@@ -352,8 +504,39 @@ def preload_testplan_images(
                 continue
 
             try:
-                # Tk PhotoImage: png/gif tốt nhất
-                assets[key] = tk.PhotoImage(file=str(p))
+                # assets[key] = tk.PhotoImage(file=str(p))
+                raw = tk.PhotoImage(master=root, file=str(p))
+                # padded = pad_to_16x9_landscape_no_scale(raw, master=root)
+
+                # assets[key] = padded
+                # # ✅ để _pick_scaled_key không pick nhầm ảnh cũ
+                # assets[f"{key}_0.5"] = padded
+                # assets[f"{key}_0.75"] = padded
+                def _downsample_to_fit(src: tk.PhotoImage, box_w: int, box_h: int) -> tk.PhotoImage:
+                    import math
+                    sw, sh = int(src.width()), int(src.height())
+                    k = max(1, math.ceil(max(sw / box_w, sh / box_h)))
+                    return src.subsample(k, k) if k > 1 else src
+
+                # def _pad_to_box(src: tk.PhotoImage, box_w: int, box_h: int, bg: str = "#471800") -> tk.PhotoImage:
+                #     out = tk.PhotoImage(master=root, width=box_w, height=box_h)
+                #     out.put(bg, to=(0, 0, box_w, box_h))
+                #     sw, sh = int(src.width()), int(src.height())
+                #     x0 = (box_w - sw) // 2
+                #     y0 = (box_h - sh) // 2
+                #     try:
+                #         out.tk.call(out, "copy", src, "-to", x0, y0, "-compositingrule", "overlay")
+                #     except tk.TclError:
+                #         out.tk.call(out, "copy", src, "-to", x0, y0)
+                #     return out
+
+                def _make(box_w: int, box_h: int) -> tk.PhotoImage:
+                    small = _downsample_to_fit(raw, box_w, box_h)
+                    return small
+
+                assets[key] = _make(cv_img_w, cv_img_h)
+                assets[f"{key}_0.75"] = _make(cv_img_w, cv_img_h)
+                assets[f"{key}_0.5"] = _make(cv_img_w, cv_img_h)
                 if log:
                     log(f"[img] loaded: {fn} -> {key}")
             except Exception as e:
@@ -478,13 +661,14 @@ if mp.current_process().name == "MainProcess":
     _load_fonts()
 
 
-def tk_load_image_resources():
+def tk_load_image_resources(root: tk.Misc | None = None):
     imgs = {}
     for k, fname in ASSET_FILES.items():
         path = str(fname)
         if not Path(path).exists():
             raise FileNotFoundError(f"Không tìm thấy asset: {fname} (đã tìm ở ./assets và cùng thư mục script)")
-        imgs[k] = tk.PhotoImage(file=path)
+        # imgs[k] = tk.PhotoImage(file=path)
+        imgs[k] = tk.PhotoImage(master=root, file=path) if root else tk.PhotoImage(file=path)
     return imgs
 
 def tk_get_loaded_fonts():

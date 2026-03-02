@@ -391,7 +391,8 @@ class ListenPort:
             baudrate=self.baudrate,
             timeout=0,               # non-blocking read
             write_timeout=self.write_timeout,
-        )
+            exclusive=True,  
+        )   
 
     def _handle_req(self, req: IORequest) -> None:
         """

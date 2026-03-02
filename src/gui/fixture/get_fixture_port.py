@@ -365,6 +365,7 @@ def _probe_one_port(
                 baudrate=br,
                 timeout=0,          # non-blocking read
                 write_timeout=0.5,  # probe cmd ngắn
+                exclusive=True,  
             )
         except Exception:
             continue
