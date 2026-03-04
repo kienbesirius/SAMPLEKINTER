@@ -106,6 +106,179 @@ import sys
 #         02:00,02:05,02:10,02:15, ... , 23:55
 # heartbeat_timeout_s = 10
 # restart_cooldown_s = 2
+# @dataclass
+# class ScheduleCfg:
+#     times: list[tuple[int, int]] | None = None
+#     heartbeat_timeout_s: float = 10.0
+#     restart_cooldown_s: float = 2.0
+
+#     # ---- internal ----
+#     _cfg_path: Path = field(init=False, repr=False)
+
+#     CFG_FILENAME: ClassVar[str] = "config_watchdog.ini"
+#     SECTION: ClassVar[str] = "WATCHDOG"
+#     DEFAULT_TIMES: ClassVar[list[tuple[int, int]]] = [(10, 0), (22, 0)]
+
+#     def __post_init__(self):
+#         # set default trước
+#         if self.times is None:
+#             self.times = list(self.DEFAULT_TIMES)
+
+#         self._cfg_path = self._resolve_cfg_path()
+
+#         # load -> nếu fail thì override default + write file
+#         if not self._try_load_from_ini(self._cfg_path):
+#             self.times = list(self.DEFAULT_TIMES)
+#             self.heartbeat_timeout_s = 10.0
+#             self.restart_cooldown_s = 2.0
+#             self._write_ini(self._cfg_path)
+
+#     # =========================
+#     # Resolve config path
+#     # =========================
+#     @classmethod
+#     def _resolve_cfg_path(cls) -> Path:
+#         base_dir = cls._resolve_exec_dir()
+#         return base_dir / cls.CFG_FILENAME
+
+#     @staticmethod
+#     def _resolve_exec_dir() -> Path:
+#         """
+#         "Cùng thư mục execute của watchdog":
+#         - nếu watchdog là exe: sys.argv[0] thường là path exe
+#         - nếu watchdog là script: sys.argv[0] là path script
+#         Fallback: __file__ / cwd
+#         """
+#         candidates: list[Path] = []
+
+#         # argv[0] (exe hoặc script path)
+#         try:
+#             if sys.argv and sys.argv[0] and sys.argv[0] not in ("-c", "-m"):
+#                 candidates.append(Path(sys.argv[0]).expanduser())
+#         except Exception:
+#             pass
+
+#         # frozen exe (đôi khi chắc ăn hơn)
+#         try:
+#             if bool(getattr(sys, "frozen", False)):
+#                 candidates.append(Path(sys.executable).expanduser())
+#         except Exception:
+#             pass
+
+#         # module file
+#         try:
+#             candidates.append(Path(__file__).expanduser())
+#         except Exception:
+#             pass
+
+#         # chọn cái tồn tại
+#         for p in candidates:
+#             try:
+#                 rp = p.resolve()
+#                 if rp.exists():
+#                     return rp.parent
+#             except Exception:
+#                 continue
+
+#         # cuối cùng: cwd
+#         return Path.cwd()
+
+#     # =========================
+#     # Load / Validate
+#     # =========================
+#     @classmethod
+#     def _parse_times(cls, raw: str) -> Optional[list[tuple[int, int]]]:
+#         """
+#         Accept:
+#           times = 06:00,12:00,18:00,00:00
+#           times = 06:00 12:00 18:00 00:00
+#           times =
+#               06:00
+#               12:00
+#         """
+#         if not raw:
+#             return None
+
+#         pairs = re.findall(r"(\d{1,2})\s*:\s*(\d{1,2})", raw)
+#         if not pairs:
+#             return None
+
+#         out: list[tuple[int, int]] = []
+#         seen = set()
+#         for h_s, m_s in pairs:
+#             hh = int(h_s)
+#             mm = int(m_s)
+#             if not (0 <= hh <= 23 and 0 <= mm <= 59):
+#                 return None
+#             t = (hh, mm)
+#             if t not in seen:
+#                 seen.add(t)
+#                 out.append(t)
+
+#         return out or None
+
+#     def _try_load_from_ini(self, path: Path) -> bool:
+#         if not path.exists():
+#             # không có file -> tạo mặc định luôn
+#             self._write_ini(path)
+#             return True
+
+#         cp = configparser.ConfigParser()
+#         try:
+#             cp.read(path, encoding="utf-8")
+#         except Exception:
+#             return False
+
+#         if not cp.has_section(self.SECTION):
+#             return False
+
+#         sec = cp[self.SECTION]
+
+#         # times (bắt buộc hợp lệ, không hợp lệ -> fail để override)
+#         times_raw = sec.get("times", fallback="").strip()
+#         parsed = self._parse_times(times_raw)
+#         if not parsed:
+#             return False
+#         self.times = parsed
+
+#         # heartbeat_timeout_s (optional, invalid -> giữ mặc định)
+#         try:
+#             v = float(sec.get("heartbeat_timeout_s", fallback=str(self.heartbeat_timeout_s)))
+#             if v > 0:
+#                 self.heartbeat_timeout_s = v
+#         except Exception:
+#             pass
+
+#         # restart_cooldown_s (optional, invalid -> giữ mặc định)
+#         try:
+#             v = float(sec.get("restart_cooldown_s", fallback=str(self.restart_cooldown_s)))
+#             if v >= 0:
+#                 self.restart_cooldown_s = v
+#         except Exception:
+#             pass
+
+#         return True
+
+#     # =========================
+#     # Write
+#     # =========================
+#     def _write_ini(self, path: Path) -> None:
+#         try:
+#             path.parent.mkdir(parents=True, exist_ok=True)
+#             times_str = ",".join(f"{hh:02d}:{mm:02d}" for hh, mm in (self.times or self.DEFAULT_TIMES))
+#             content = (
+#                 f"[{self.SECTION}]\n"
+#                 f"times = {times_str}\n"
+#                 f"heartbeat_timeout_s = {self.heartbeat_timeout_s}\n"
+#                 f"restart_cooldown_s = {self.restart_cooldown_s}\n"
+#             )
+#             path.write_text(content, encoding="utf-8")
+#         except Exception:
+#             # nếu không ghi được (permission), vẫn chạy bằng config đang có trong RAM
+#             pass
+
+_UTF8_BOM = b"\xef\xbb\xbf"
+
 @dataclass
 class ScheduleCfg:
     times: list[tuple[int, int]] | None = None
@@ -114,24 +287,21 @@ class ScheduleCfg:
 
     # ---- internal ----
     _cfg_path: Path = field(init=False, repr=False)
+    _last_reload_monotonic: float = field(default=0.0, init=False, repr=False)
 
     CFG_FILENAME: ClassVar[str] = "config_watchdog.ini"
     SECTION: ClassVar[str] = "WATCHDOG"
     DEFAULT_TIMES: ClassVar[list[tuple[int, int]]] = [(10, 0), (22, 0)]
+    RELOAD_EVERY_S: ClassVar[float] = 5.0
 
     def __post_init__(self):
-        # set default trước
         if self.times is None:
             self.times = list(self.DEFAULT_TIMES)
 
         self._cfg_path = self._resolve_cfg_path()
 
-        # load -> nếu fail thì override default + write file
-        if not self._try_load_from_ini(self._cfg_path):
-            self.times = list(self.DEFAULT_TIMES)
-            self.heartbeat_timeout_s = 10.0
-            self.restart_cooldown_s = 2.0
-            self._write_ini(self._cfg_path)
+        # boot: ensure config exists and is valid (else recreate)
+        self.reload(force=True)
 
     # =========================
     # Resolve config path
@@ -143,35 +313,24 @@ class ScheduleCfg:
 
     @staticmethod
     def _resolve_exec_dir() -> Path:
-        """
-        "Cùng thư mục execute của watchdog":
-        - nếu watchdog là exe: sys.argv[0] thường là path exe
-        - nếu watchdog là script: sys.argv[0] là path script
-        Fallback: __file__ / cwd
-        """
         candidates: list[Path] = []
-
-        # argv[0] (exe hoặc script path)
         try:
             if sys.argv and sys.argv[0] and sys.argv[0] not in ("-c", "-m"):
                 candidates.append(Path(sys.argv[0]).expanduser())
         except Exception:
             pass
 
-        # frozen exe (đôi khi chắc ăn hơn)
         try:
             if bool(getattr(sys, "frozen", False)):
                 candidates.append(Path(sys.executable).expanduser())
         except Exception:
             pass
 
-        # module file
         try:
             candidates.append(Path(__file__).expanduser())
         except Exception:
             pass
 
-        # chọn cái tồn tại
         for p in candidates:
             try:
                 rp = p.resolve()
@@ -180,25 +339,75 @@ class ScheduleCfg:
             except Exception:
                 continue
 
-        # cuối cùng: cwd
         return Path.cwd()
 
     # =========================
-    # Load / Validate
+    # Public API: reload tick
+    # =========================
+    def reload(self, *, force: bool = False) -> bool:
+        """
+        Reload config_watchdog.ini every RELOAD_EVERY_S.
+        Return True if (re)loaded and may affect schedule values.
+        """
+        now = time.monotonic()
+        if (not force) and (now - self._last_reload_monotonic < self.RELOAD_EVERY_S):
+            return False
+        self._last_reload_monotonic = now
+
+        path = self._cfg_path
+        lg = logging.getLogger("watchdog")
+
+        # missing -> create fresh
+        if not path.exists():
+            ok = self._write_ini(path)
+            if ok:
+                lg.info(f"[cfg] created new {path}")
+            else:
+                lg.warning(f"[cfg] cannot create {path} (permission?)")
+            return ok
+
+        # BOM -> delete and recreate (NOT strip)
+        try:
+            raw = path.read_bytes()
+            if raw.startswith(_UTF8_BOM):
+                try:
+                    path.unlink()
+                except Exception:
+                    pass
+                ok = self._write_ini(path)
+                lg.warning(f"[cfg] BOM detected -> recreated {path}")
+                return ok
+        except Exception as e:
+            # can't read -> recreate
+            try:
+                path.unlink()
+            except Exception:
+                pass
+            ok = self._write_ini(path)
+            lg.warning(f"[cfg] read failed ({e}) -> recreated {path}")
+            return ok
+
+        # normal load
+        ok = self._try_load_from_ini(path)
+        if ok:
+            return True
+
+        # invalid -> delete and recreate fresh
+        try:
+            path.unlink()
+        except Exception:
+            pass
+        ok2 = self._write_ini(path)
+        lg.warning(f"[cfg] invalid config -> recreated {path}")
+        return ok2
+
+    # =========================
+    # Parse / Validate
     # =========================
     @classmethod
     def _parse_times(cls, raw: str) -> Optional[list[tuple[int, int]]]:
-        """
-        Accept:
-          times = 06:00,12:00,18:00,00:00
-          times = 06:00 12:00 18:00 00:00
-          times =
-              06:00
-              12:00
-        """
         if not raw:
             return None
-
         pairs = re.findall(r"(\d{1,2})\s*:\s*(\d{1,2})", raw)
         if not pairs:
             return None
@@ -214,15 +423,9 @@ class ScheduleCfg:
             if t not in seen:
                 seen.add(t)
                 out.append(t)
-
         return out or None
 
     def _try_load_from_ini(self, path: Path) -> bool:
-        if not path.exists():
-            # không có file -> tạo mặc định luôn
-            self._write_ini(path)
-            return True
-
         cp = configparser.ConfigParser()
         try:
             cp.read(path, encoding="utf-8")
@@ -234,14 +437,13 @@ class ScheduleCfg:
 
         sec = cp[self.SECTION]
 
-        # times (bắt buộc hợp lệ, không hợp lệ -> fail để override)
         times_raw = sec.get("times", fallback="").strip()
         parsed = self._parse_times(times_raw)
         if not parsed:
             return False
         self.times = parsed
 
-        # heartbeat_timeout_s (optional, invalid -> giữ mặc định)
+        # heartbeat_timeout_s
         try:
             v = float(sec.get("heartbeat_timeout_s", fallback=str(self.heartbeat_timeout_s)))
             if v > 0:
@@ -249,7 +451,7 @@ class ScheduleCfg:
         except Exception:
             pass
 
-        # restart_cooldown_s (optional, invalid -> giữ mặc định)
+        # restart_cooldown_s
         try:
             v = float(sec.get("restart_cooldown_s", fallback=str(self.restart_cooldown_s)))
             if v >= 0:
@@ -260,11 +462,13 @@ class ScheduleCfg:
         return True
 
     # =========================
-    # Write
+    # Write fresh ini
     # =========================
-    def _write_ini(self, path: Path) -> None:
+    def _write_ini(self, path: Path) -> bool:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
+
+            # luôn ghi “sạch” utf-8 (KHÔNG BOM)
             times_str = ",".join(f"{hh:02d}:{mm:02d}" for hh, mm in (self.times or self.DEFAULT_TIMES))
             content = (
                 f"[{self.SECTION}]\n"
@@ -273,10 +477,10 @@ class ScheduleCfg:
                 f"restart_cooldown_s = {self.restart_cooldown_s}\n"
             )
             path.write_text(content, encoding="utf-8")
+            return True
         except Exception:
-            # nếu không ghi được (permission), vẫn chạy bằng config đang có trong RAM
-            pass
-
+            return False
+        
 def is_windows() -> bool:
     return platform.system().lower().startswith("win")
 
@@ -403,6 +607,8 @@ class Watchdog:
 
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self._setup_log()
+
+        self._cfg_reload_last = 0.0
 
         self.cfg = ScheduleCfg()
         self.mode = "GUARD"     # "GUARD" | "SCHEDULE"
@@ -556,6 +762,16 @@ class Watchdog:
 
             now = time.time()
 
+            # --- reload watchdog config every 5s ---
+            try:
+                # reload() tự có throttle 5s bên trong
+                changed = self.cfg.reload(force=False)
+                if changed:
+                    with self._lock:
+                        # nếu đang ở SCHEDULE thì next_run_ts phải update theo times mới
+                        self._recalc_next_run()
+            except Exception as e:
+                self.logger.error(f"[cfg] reload error: {e}")
             # -------- SCHEDULE MODE --------
             if mode == "SCHEDULE":
                 if now >= next_run:
