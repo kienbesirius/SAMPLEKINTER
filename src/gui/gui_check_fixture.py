@@ -165,8 +165,8 @@ def obtaining_fixture_com(
     cancel_event: threading.Event = None,
     progress_cb=None,
     *,
-    max_workers: int = 4,
-    retry_rounds: int = 10,
+    max_workers: int = 10,
+    retry_rounds: int = 3,
     retry_delay_s: float = 2.5,
     do_slow_fallback_last_round: bool = True,
 ):
@@ -195,10 +195,10 @@ def obtaining_fixture_com(
 
     # FAST params (tối ưu thời gian)
     fx_timeout = float(getattr(fx, "timeout", 0.5) or 0.5)
-    fast_wait = min(0.35, max(0.15, fx_timeout))  # không quá nhỏ để tránh false negative
+    fast_wait = min(0.55, max(0.15, fx_timeout))  # không quá nhỏ để tránh false negative
     fast_probe_cmds = ["?", "help", "HELP", "SHOW_COMMAND"]
     fast_kwargs = dict(
-        baudrates=[fx.baudrate],
+        baudrates=[115200, 9600, 57600, 38400, 19200],
         per_cmd_wait_s=fast_wait,
         probe_cmds=fast_probe_cmds,
     )
@@ -227,7 +227,12 @@ def obtaining_fixture_com(
         )
 
         try:
-            found_txt = get_fixture_port(fx.port, **fast_kwargs)
+            fast_kwargs_copy = dict(
+                baudrates=[fx.baudrate],
+                per_cmd_wait_s=fast_wait,
+                probe_cmds=fast_probe_cmds,
+            )
+            found_txt = get_fixture_port(fx.port, **fast_kwargs_copy)
             if not found_txt:
                 return None
 
@@ -254,7 +259,7 @@ def obtaining_fixture_com(
         def worker(port: str):
             if is_stopped():
                 return (port, None)
-            _progress(f"Checking {port}...", port=port, baudrate=fx.baudrate, ending_line=fx.ending_line)
+            _progress(f"Checking {port}...", port=port)
             try:
                 txt = get_fixture_port(port, **kwargs)
                 return (port, txt)

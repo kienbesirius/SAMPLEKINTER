@@ -7,7 +7,7 @@ from src.utils.resource_path import app_dir
 
 CONFIG_PATH = app_dir() / "config.ini"
 configparser = configparser.ConfigParser()
-configparser.read(CONFIG_PATH, encoding="utf-8")
+configparser.read(CONFIG_PATH, encoding="utf-8-sig")
 
 TEST_GROUP=configparser.get("Bypass_VI3", "TEST_GROUP", fallback="VI3")
 SEQ_MD5=configparser.get("Bypass_VI3", "SEQ_MD5", fallback="GOLDFISHVI3")
@@ -344,7 +344,7 @@ def write_log(
     path_log: os.PathLike | str | None = None,
     prefix: str = "HERMES_LOGS_",
     tz: str | object | None = None,
-    encoding: str = "utf-8",
+    encoding: str = "utf-8-sig",
     autoflush: bool = False,
     also_print: bool = False,
 ) -> str | None:

@@ -117,7 +117,7 @@ class ScheduleCfg:
 
     CFG_FILENAME: ClassVar[str] = "config_watchdog.ini"
     SECTION: ClassVar[str] = "WATCHDOG"
-    DEFAULT_TIMES: ClassVar[list[tuple[int, int]]] = [(6, 0), (12, 0), (18, 0), (0, 0)]
+    DEFAULT_TIMES: ClassVar[list[tuple[int, int]]] = [(10, 0), (22, 0)]
 
     def __post_init__(self):
         # set default trước

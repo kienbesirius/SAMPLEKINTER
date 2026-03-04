@@ -3,6 +3,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple, Union, Callable
+from src.utils.config_go import fixture_tokens
 
 import serial  # pip install pyserial
 
@@ -94,74 +95,9 @@ _HELP_MARKERS = (
 )
 
 # Token command “một dòng 1 lệnh” thường gặp của fixture
-_FIXTURE_TOKENS = {
-    "?", "HELP", "SHOW_COMMAND",
-    "OPEN", "CLOSE", "IN", "OUT", "UP", "DOWN",
-    "EMPTY_IN", "EMPTY", "PRODUCT", "STATE", "VERSION",
-    "POWER_ON", "POWER_OFF", "PWR_ON", "PWR_OFF",
-    "USB_IN", "USB_OUT", "RJ45_IN", "RJ45_OUT",
-    "READSN", "SN", "RESET", "CHECK_DOOR",
-    "OPEN_DOOR", "CLOSE_DOOR",
-    "LOCK_DUT", "UNLOCK_DUT",
-    "PROBE_ON", "PROBE_OFF",
+_TOKENS_ = fixture_tokens()
 
-    "PRESS_ON", "PRESS_OFF",
-
-    "RED_ON", "GREEN_ON", "YELLOW_ON",
-
-    "RASTER_STATE", "RASTER_UP", "RASTER_DOWN",
-    "RASTER_IN", "RASTER_OUT",
-
-    "CLEAR_COUNT",
-    # --- nhóm HELP kiểu list đơn ---
-    "VERSIONS", "BOX_STATUS", "RELAY_ALL_ON", "RELAY",
-    "COUNTER_RESET", "COUNTER_ADD", "COUNTER_SUB", "READ_COUNT",
-    "COUNT", "READ_COUNT_ALL", "CLEAR_COUNT", "RST_SET_COUNT",
-
-    # --- nhóm ON/OFF + đo đạc (xuất hiện trong help list) ---
-    "BATTERY_CYLINDER", "LED_CYLINDER", "BUTTON_CYLINDER", "HEATER_PLATE_CYLINDER",
-    "DEBUGBOARD", "TYPEC_BOARD",
-    "SBU_PULL_DOWN",
-    "BATTERY_CHARGE", "DEBUG_VBUS_5V",
-    "TYPEC_VBUS_PC", "TYPEC_VBUS_POE", "TYPEC_USB_PC", "TYPEC_USB_POE",
-    "SYSTEM_VOL_GET", "SYSTEM_CUR_GET", "BATTERY_CHARGE_VOL_GET",
-    "CUR_MODE", "READ_CUR", "LOAD",
-
-    # --- nhóm menu help (có command + mô tả) ---
-    "STATUS", "TEMP", "LIGHT_ON", "LIGHT_OFF", "ALL_LED_OFF",
-    "RED_ON", "GREEN_ON", "BLUE_ON",
-    "DEBUG_POWER_ON", "DEBUG_POWER_OFF",
-    "TYPEC_POWER_ON", "TYPEC_POWER_OFF",
-    "OPEN_DOOR", "CLOSE_DOOR",
-    "SIDE_IN", "SIDE_OUT",
-
-    # --- nhóm “CONTROL CAMMAND” kiểu CMD:DESC ---
-    "S_SYSTEM_RST",
-    "SET_U1BR", "SET_U2BR", "SET_U3BR",
-    "SET_DEBUG_MODE", "SET_BTN_DELAY",
-    "READ_PARA", "CLEAR_PARA",
-    "OUTPUTH", "OUTPUTL",
-    "FIXTURE_IN", "FIXTURE_OUT",
-    "POGOPIN_UP", "POGOPIN_DOWN",
-    "USB_UP", "USB_DOWN",
-    "FASTEN_ON", "FASTEN_OFF",
-    "BUTTON_TEST",
-    "POWER_ON", "POWER_OFF", "LED_ON", "LED_OFF",
-    "EMPTY_OUT",
-    "CHECK_DUT", "CHECK_STATE", "CHECK_RASTER",
-    "READ_MAX_FORCE", "READ_REAL_FORCE", "SET_FORCE_BAUDRATE",
-    "AUDIO_OPEN", "AUDIO_CLOSE",
-    "SET_VOLUME_5", "SET_VOLUME_10", "SET_VOLUME_20",
-    "SET_AUDIO_ADDR", "VOLUME_ADD", "VOLUME_DEC",
-    "AGING_TEST",
-
-    # --- nhóm help list khác ---
-    "FIND", "GS_PWR_ON", "GS_PWR_OFF",
-    "DUT_SENSOR", "RASTER_STATE",
-    "POWER_ON1", "POWER_ON2", "POWER_OFF1", "POWER_OFF2",
-    "UART_DL_ON", "UART_DL_OFF",
-
-}
+_FIXTURE_TOKENS = _TOKENS_
 
 # Các dòng info/boot thường thấy (không phải command list)
 _INFO_PREFIX = (
