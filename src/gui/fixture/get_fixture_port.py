@@ -405,6 +405,20 @@ def _probe_one_port(
                             read_timeout=per_cmd_wait_s,
                             tail_timeout=0.75,
                         )
+
+                        raw += _send_and_wait_text(
+                            ser,
+                            payload,
+                            read_timeout=per_cmd_wait_s,
+                            tail_timeout=0.75,
+                        )
+
+                        raw += _send_and_wait_text(
+                            ser,
+                            payload,
+                            read_timeout=per_cmd_wait_s,
+                            tail_timeout=0.75,
+                        )
                     except Exception:
                         continue
 

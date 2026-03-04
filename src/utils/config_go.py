@@ -75,9 +75,9 @@
 # def load_fixture_cfg(path: str) -> FixtureConfig:
 #     # strict=False để không crash nếu config có key trùng (slot8 bị lặp)
 #     cfg = configparser.ConfigParser(strict=False)
-#     # cfg.read(path, encoding="utf-8")
+#     # cfg.read(path, encoding="utf-8-sig")
 #     try_strip_utf8_bom(path)
-#     cfg.read(path, encoding=_ini_encoding("utf-8"))
+#     cfg.read(path, encoding=_ini_encoding("utf-8-sig"))
 
 
 #     port = cfg.get("FIXTURE", "port", fallback="").strip()
@@ -124,7 +124,7 @@
 #     ending_line: Optional[str] = None,   # "CRLF"|"LF"|"CR"|"NONE"
 #     timeout: Optional[float] = None,
 #     section_name: str = "FIXTURE",
-#     encoding: str = "utf-8",
+#     encoding: str = "utf-8-sig",
 # ) -> None:
 #     path = Path(ini_path)
 #     raw = path.read_bytes() if path.exists() else b""
@@ -179,7 +179,7 @@
 #     guide_text: str,
 #     section_name: str = "SLOT_GUIDE",
 #     slots: int = 12,
-#     encoding: str = "utf-8",
+#     encoding: str = "utf-8-sig",
 # ) -> None:
 #     if not (1 <= int(slot_idx) <= int(slots)):
 #         raise ValueError(f"slot_idx out of range: {slot_idx}")
@@ -243,7 +243,7 @@
 #     image_key: str,
 #     section_name: str = "SLOT_IMAGE",
 #     slots: int = 12,
-#     encoding: str = "utf-8",
+#     encoding: str = "utf-8-sig",
 # ) -> None:
 #     path = Path(ini_path)
 #     if path.exists():
@@ -345,7 +345,7 @@
 #     slots: int = 12,
 #     idle_value: str = "idle",
 #     item_value: str = "item",
-#     encoding: str = "utf-8",
+#     encoding: str = "utf-8-sig",
 # ) -> None:
 #     """
 #     Text-based (giữ format/comment):
@@ -455,7 +455,7 @@
 # SlotStatus = Literal["pass", "fail", "testing", "idle"]
 # _ALLOWED_STATUS = {"pass", "fail", "testing", "idle"}
 
-# def _atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None:
+# def _atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8-sig") -> None:
 #     tmp_dir = str(path.parent)
 #     fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=tmp_dir, text=True)
 #     try:
@@ -516,7 +516,7 @@
 #     section_name: str = "SLOT_STATUS",
 #     slot_test_section: str = "SLOT_TEST",
 #     slots: int = 12,
-#     encoding: str = "utf-8",
+#     encoding: str = "utf-8-sig",
 # ) -> None:
 #     """
 #     Text-based update với “gate” theo SLOT_TEST:
@@ -648,7 +648,7 @@
 #     section_name: str = "SLOT_STATUS",
 #     slot_test_section: str = "SLOT_TEST",
 #     slots: int = 12,
-#     encoding: str = "utf-8",
+#     encoding: str = "utf-8-sig",
 # ) -> Dict[int, str]:
 #     """
 #     Read-only, text-based parse.
@@ -704,7 +704,7 @@
 #     slot_test_section: str = "SLOT_TEST",
 #     slot_cmd_section: str = "SLOT_COMMAND",
 #     slots: int = 12,
-#     encoding: str = "utf-8",
+#     encoding: str = "utf-8-sig",
 # ) -> None:
 #     """
 #     Cập nhật thủ công thông tin slot:
@@ -1275,7 +1275,7 @@
 #     *,
 #     section_name: str = "STATION",
 #     key_name: str = "selected_station",
-#     encoding: str = "utf-8",
+#     encoding: str = "utf-8-sig",
 # ) -> None:
 #     """
 #     Text-based upsert:
@@ -1368,7 +1368,7 @@
 #     plan: TestPlan,
 #     *,
 #     slots: int = 12,
-#     encoding: str = "utf-8",
+#     encoding: str = "utf-8-sig",
 #     write_expect_reject: bool = True,
 # ) -> None:
 #     """
@@ -1410,7 +1410,7 @@
 # def load_station_cfg(
 #     path: Union[str, Path],
 #     *,
-#     encoding: str = "utf-8",
+#     encoding: str = "utf-8-sig",
 #     station_root_section: str = "STATION",
 #     station_prefix: str = "STATION_",
 #     cmd_keys: Tuple[str, ...] = _STATION_CMD_KEYS,
@@ -1525,7 +1525,7 @@
 # def get_selected_station(
 #     path: Union[str, Path],
 #     *,
-#     encoding: str = "utf-8",
+#     encoding: str = "utf-8-sig",
 # ) -> Optional[Station]:
 #     selected, _stations_list, station_map = load_station_cfg(path, encoding=encoding)
 #     if not selected:
@@ -1538,8 +1538,8 @@
 #     - utf-8 / utf8 -> utf-8-sig (auto strip BOM if present)
 #     - others: keep as-is
 #     """
-#     e = (enc or "utf-8").strip().lower().replace("_", "-")
-#     if e in ("utf8", "utf-8"):
+#     e = (enc or "utf-8-sig").strip().lower().replace("_", "-")
+#     if e in ("utf8", "utf-8-sig"):
 #         return "utf-8-sig"
 #     return enc
 
@@ -1620,9 +1620,9 @@ class FixtureConfig:
 def load_fixture_cfg(path: str) -> FixtureConfig:
     # strict=False để không crash nếu config có key trùng (slot8 bị lặp)
     cfg = configparser.ConfigParser(strict=False)
-    # cfg.read(path, encoding="utf-8")
+    # cfg.read(path, encoding="utf-8-sig")
     try_strip_utf8_bom(path)
-    cfg.read(path, encoding=_ini_encoding("utf-8"))
+    cfg.read(path, encoding=_ini_encoding("utf-8-sig"))
 
 
     port = cfg.get("FIXTURE", "port", fallback="").strip()
@@ -1669,7 +1669,7 @@ def update_ini_fixture_section(
     ending_line: Optional[str] = None,   # "CRLF"|"LF"|"CR"|"NONE"
     timeout: Optional[float] = None,
     section_name: str = "FIXTURE",
-    encoding: str = "utf-8",
+    encoding: str = "utf-8-sig",
 ) -> None:
     path = Path(ini_path)
     raw = path.read_bytes() if path.exists() else b""
@@ -1724,7 +1724,7 @@ def update_ini_slot_guide(
     guide_text: str,
     section_name: str = "SLOT_GUIDE",
     slots: int = 12,
-    encoding: str = "utf-8",
+    encoding: str = "utf-8-sig",
 ) -> None:
     if not (1 <= int(slot_idx) <= int(slots)):
         raise ValueError(f"slot_idx out of range: {slot_idx}")
@@ -1788,7 +1788,7 @@ def update_ini_slot_image(
     image_key: str,
     section_name: str = "SLOT_IMAGE",
     slots: int = 12,
-    encoding: str = "utf-8",
+    encoding: str = "utf-8-sig",
 ) -> None:
     path = Path(ini_path)
     if path.exists():
@@ -1890,7 +1890,7 @@ def reset_slot_status_section_to_idle(
     slots: int = 12,
     idle_value: str = "idle",
     item_value: str = "item",
-    encoding: str = "utf-8",
+    encoding: str = "utf-8-sig",
 ) -> None:
     """
     Text-based (giữ format/comment):
@@ -2000,7 +2000,7 @@ def reset_slot_status_section_to_idle(
 SlotStatus = Literal["pass", "fail", "testing", "idle"]
 _ALLOWED_STATUS = {"pass", "fail", "testing", "idle"}
 
-def _atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None:
+def _atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8-sig") -> None:
     tmp_dir = str(path.parent)
     fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=tmp_dir, text=True)
     try:
@@ -2061,7 +2061,7 @@ def update_ini_slot_status(
     section_name: str = "SLOT_STATUS",
     slot_test_section: str = "SLOT_TEST",
     slots: int = 12,
-    encoding: str = "utf-8",
+    encoding: str = "utf-8-sig",
 ) -> None:
     """
     Text-based update với “gate” theo SLOT_TEST:
@@ -2193,7 +2193,7 @@ def load_slot_status_from_ini(
     section_name: str = "SLOT_STATUS",
     slot_test_section: str = "SLOT_TEST",
     slots: int = 12,
-    encoding: str = "utf-8",
+    encoding: str = "utf-8-sig",
 ) -> Dict[int, str]:
     """
     Read-only, text-based parse.
@@ -2249,7 +2249,7 @@ def update_ini_manual_slot_info(
     slot_test_section: str = "SLOT_TEST",
     slot_cmd_section: str = "SLOT_COMMAND",
     slots: int = 12,
-    encoding: str = "utf-8",
+    encoding: str = "utf-8-sig",
 ) -> None:
     """
     Cập nhật thủ công thông tin slot:
@@ -2492,7 +2492,7 @@ def _read_selected_process_project_from_ini(
     ini_path: Union[str, Path],
     *,
     section_name: str = "STATION",
-    encoding: str = "utf-8",
+    encoding: str = "utf-8-sig",
 ) -> Tuple[str, str]:
     """
     Read filters from config.ini:
@@ -2937,7 +2937,7 @@ def update_ini_selected_station(
     *,
     section_name: str = "STATION",
     key_name: str = "selected_station",
-    encoding: str = "utf-8",
+    encoding: str = "utf-8-sig",
 ) -> None:
     """
     Text-based upsert:
@@ -2988,7 +2988,7 @@ def update_ini_selected_project(
     *,
     section_name: str = "STATION",
     key_name: str = "selected_project",
-    encoding: str = "utf-8",
+    encoding: str = "utf-8-sig",
 ) -> None:
     """
     Upsert:
@@ -3010,7 +3010,7 @@ def update_ini_selected_process(
     *,
     section_name: str = "STATION",
     key_name: str = "selected_process",
-    encoding: str = "utf-8",
+    encoding: str = "utf-8-sig",
 ) -> None:
     """
     Upsert:
@@ -3075,7 +3075,7 @@ def apply_test_plan_to_config_ini(
     plan: TestPlan,
     *,
     slots: int = 12,
-    encoding: str = "utf-8",
+    encoding: str = "utf-8-sig",
     write_expect_reject: bool = True,
 ) -> None:
     """
@@ -3117,7 +3117,7 @@ def apply_test_plan_to_config_ini(
 def load_station_cfg(
     path: Union[str, Path],
     *,
-    encoding: str = "utf-8",
+    encoding: str = "utf-8-sig",
     station_root_section: str = "STATION",
     station_prefix: str = "STATION_",
     cmd_keys: Tuple[str, ...] = _STATION_CMD_KEYS,
@@ -3232,7 +3232,7 @@ def _split_csv(s: str) -> List[str]:
 def get_selected_station(
     path: Union[str, Path],
     *,
-    encoding: str = "utf-8",
+    encoding: str = "utf-8-sig",
 ) -> Optional[Station]:
     selected, _stations_list, station_map = load_station_cfg(path, encoding=encoding)
     if not selected:
@@ -3245,7 +3245,7 @@ def _ini_encoding(enc: str) -> str:
     - utf-8 / utf8 -> utf-8-sig (auto strip BOM if present)
     - others: keep as-is
     """
-    e = (enc or "utf-8").strip().lower().replace("_", "-")
-    if e in ("utf8", "utf-8"):
+    e = (enc or "utf-8-sig").strip().lower().replace("_", "-")
+    if e in ("utf8", "utf-8-sig"):
         return "utf-8-sig"
     return enc

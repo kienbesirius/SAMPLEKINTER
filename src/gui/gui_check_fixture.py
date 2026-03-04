@@ -1100,7 +1100,7 @@ class AppGUI:
     def _read_selected_station_raw(self, cfg_path: Path) -> str:
         import configparser
         cfg = configparser.ConfigParser(strict=False)
-        cfg.read(str(cfg_path), encoding="utf-8")
+        cfg.read(str(cfg_path), encoding="utf-8-sig")
         return cfg.get("STATION", "selected_station", fallback="").strip()
     
     def _init_station_text(self, text_station):
@@ -1113,13 +1113,13 @@ class AppGUI:
     def _read_selected_project_raw(self, cfg_path: Path) -> str:
         import configparser
         cfg = configparser.ConfigParser(strict=False)
-        cfg.read(str(cfg_path), encoding="utf-8")
+        cfg.read(str(cfg_path), encoding="utf-8-sig")
         return cfg.get("STATION", "selected_project", fallback="").strip()
 
     def _read_selected_process_raw(self, cfg_path: Path) -> str:
         import configparser
         cfg = configparser.ConfigParser(strict=False)
-        cfg.read(str(cfg_path), encoding="utf-8")
+        cfg.read(str(cfg_path), encoding="utf-8-sig")
         return cfg.get("STATION", "selected_process", fallback="").strip()
 
     def _init_project_text(self, text_project):
@@ -1632,7 +1632,7 @@ class AppGUI:
         return "ADMIN" if self.is_admin else "OPER"
 
     def _get_admin_secret(self) -> str:
-        return "1..."
+        return "Foxconn168hh!!"
 
     def _verify_admin_password(self, pw: str) -> bool:
         secret = self._get_admin_secret()
@@ -3069,7 +3069,8 @@ class AppGUI:
             # (optional) warmup
             self.send_to_com(cmd="help", on_start=self._task_start_cb, on_success=None, on_error=None, on_finally=None)
             self.send_to_com(cmd="?", on_start=self._task_start_cb, on_success=None, on_error=None, on_finally=None)
-
+            self.send_to_com(cmd="help", on_start=self._task_start_cb, on_success=None, on_error=None, on_finally=None)
+            self.send_to_com(cmd="?", on_start=self._task_start_cb, on_success=None, on_error=None, on_finally=None)
             self._update_logs_panel(f"ListenPort started on {result}", "green")
             return
         except Exception as e:
@@ -3097,7 +3098,9 @@ class AppGUI:
         def _ok(result, _meta):
             ok, lines = result
             self._update_logs_panel(f"TX: {cmd} | RX lines: {len(lines)}", "blue")
-            self._update_probe_logs_panel(f"{cmd}: {lines}", "green")
+            self._update_probe_logs_panel(f"{_meta}", "blue")
+            text = "\n".join(s.strip() for s in lines if s and s.strip())
+            self._update_probe_logs_panel(f"{cmd}: {text}", "green")
             if lines:
                 self._update_logs_panel(f"RX last: {lines[-1]}", "green" if ok else "yellow")
 
@@ -3509,7 +3512,7 @@ class AppGUI:
 
         raw = ini_path.read_bytes() if ini_path.exists() else b""
         newline = "\r\n" if b"\r\n" in raw else "\n"
-        lines = (raw.decode("utf-8", errors="replace").splitlines() if raw else [])
+        lines = (raw.decode("utf-8-sig", errors="replace").splitlines() if raw else [])
 
         section_re = re.compile(r"^\s*\[([^\]]+)\]\s*$")
         kv_re = re.compile(r"^(\s*)(selected_station)(\s*=\s*)(.*?)(\s*)$", re.IGNORECASE)
@@ -3553,7 +3556,7 @@ class AppGUI:
             new_sec.append(f"selected_station={station_name}")
 
         out_lines = lines[:start] + new_sec + lines[end:]
-        ini_path.write_text(newline.join(out_lines) + newline, encoding="utf-8")
+        ini_path.write_text(newline.join(out_lines) + newline, encoding="utf-8-sig")
         
     def _guide_set_confirm_enabled_all(self, enabled: bool) -> None:
         """
@@ -3761,14 +3764,14 @@ class AppGUI:
 
         cfg_path = Path(app_dir()) / "config.ini"
         cfg = configparser.ConfigParser(strict=False)
-        cfg.read(str(cfg_path), encoding="utf-8")
+        cfg.read(str(cfg_path), encoding="utf-8-sig")
 
         if not cfg.has_section("STATION"):
             cfg.add_section("STATION")
 
         cfg.set("STATION", "selected_station", station_name)
 
-        with open(cfg_path, "w", encoding="utf-8") as f:
+        with open(cfg_path, "w", encoding="utf-8-sig") as f:
             cfg.write(f)
             
     # def _guide_build_plan(self) -> list[GuideCase]:
@@ -3845,7 +3848,7 @@ class AppGUI:
         # 2) đọc trực tiếp config.ini để lấy SLOT_EXPECT / SLOT_REJECT
         cfg = configparser.ConfigParser(strict=False)
         try:
-            cfg.read(str(self.cfg_path), encoding="utf-8")
+            cfg.read(str(self.cfg_path), encoding="utf-8-sig")
         except Exception:
             pass
 
