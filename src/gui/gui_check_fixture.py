@@ -166,7 +166,7 @@ def obtaining_fixture_com(
     progress_cb=None,
     *,
     max_workers: int = 10,
-    retry_rounds: int = 3,
+    retry_rounds: int = 2,
     retry_delay_s: float = 2.5,
     do_slow_fallback_last_round: bool = True,
 ):
@@ -360,8 +360,8 @@ def obtaining_fixture_com(
 
         # 2) refresh ports list mỗi vòng (vì có thể COM vừa xuất hiện)
         ports = list(get_serial_ports() or [])
-        if fx.port and fx.port in ports:
-            ports.remove(fx.port)
+        # if fx.port and fx.port in ports:
+        #     ports.remove(fx.port)
 
         if not ports:
             emit("No serial ports found.")
